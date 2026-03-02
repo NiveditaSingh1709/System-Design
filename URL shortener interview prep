@@ -1,0 +1,3186 @@
+🔗 URL Shortener – System Design (Interview Ready)
+A URL shortener (like Bitly or TinyURL) converts long URLs into short, unique links.
+
+Example:
+https://example.com/products/category/12345 → https://sho.rt/Ab3Xk
+
+1️⃣ Functional Requirements
+✅ Core Features
+    Generate short URL from long URL
+    Redirect short URL → original long URL
+    Custom alias support (optional)
+    Set expiration time (optional)
+    Track analytics (clicks, location, device)
+
+❌ Non-Functional Requirements
+      Highly available (99.99%)
+      Low latency redirection (< 100ms)
+      Scalable (billions of URLs)
+      Secure (prevent spam/malware)
+
+2️⃣ High-Level Design (HLD)
+🔹 Components
+    1->Client
+      Browser / Mobile App
+    2->Load Balancer
+      Distributes traffic
+    3->Application Servers
+      -Handle:
+        URL creation
+        Redirect requests
+    4->Database
+      Stores mapping:
+      short_code → long_url
+    5->Cache (Redis)
+      Fast lookup for frequently accessed URLs
+    6-> Analytics Service
+      Async event logging via queue (Kafka)
+
+3️⃣ Deep Dive – Key Design Decisions
+🔹 A. How to Generate Short Code?
+Option 1: Hashing (MD5/SHA)
+    Hash long URL → take first 6-8 characters
+    
+    Problem: collisions
+
+Option 2: Base62 Encoding (Recommended)
+Characters:
+
+    a-z (26)
+    A-Z (26)
+    0-9 (10)
+    Total = 62
+    If ID = 125 → Base62 → "cb"
+    If length = 7
+    Possible combinations = 62⁷ ≈ 3.5 trillion URLs
+  
+    How it works:
+    Generate auto-increment ID  
+    Convert to Base62
+    Store mapping
+
+🔹 B. Database Design
+    Table: URL
+    Column	Type
+    id	bigint (PK)
+    short_code	varchar(10) UNIQUE
+    long_url	text
+    created_at	timestamp
+    expiry_date	timestamp
+    user_id	bigint
+    click_count	bigint
+      Index on:
+      short_code (critical)
+
+🔹 C. Redirect Flow
+    User hits:
+    https://sho.rt/Ab3Xk
+    Steps:
+      1->Load Balancer
+      2->App server
+      3->Check Redis cache
+      4->If hit → redirect
+      5->If miss → DB lookup → update cache → redirect
+
+🔹 D. Scaling Strategy
+  🔹 Read Heavy System
+      Redirection is 1000x more frequent than creation.
+      
+      Scaling Plan:
+      Problem	Solution
+      High traffic	Horizontal scaling
+      DB overload	Read replicas
+      Slow lookup	Redis cache
+      Analytics load	Async queue (Kafka)
+      Global users	CDN + Geo DNS
+
+🔹 E. Handling Collisions
+      If using random generation:
+      Check DB before insert
+      Retry if exists
+      If using Base62 + unique ID:
+      No collision issue
+
+🔹 F. Prevent Abuse
+      Rate limiting
+      CAPTCHA
+      Blacklist malicious domains
+      Expiry for inactive URLs
+
+4️⃣ Capacity Estimation (Interview Style)
+      Assume:
+      100M new URLs per month
+      1B redirects per month
+      Storage:
+      1 URL record ≈ 500 bytes
+      100M × 500B = 50GB per month
+      600GB per year
+      
+      Use:
+      Partitioning by ID or date
+
+5️⃣ Advanced Optimizations
+    🔹 1. Pre-generate Short Codes
+    Keep pool of unused codes.
+    
+    🔹 2. Bloom Filter
+    Check existence quickly before DB hit.
+    
+    🔹 3. Multi-Region Setup
+    Use Geo DNS
+    
+    Replicate DB globally
+    Keep regional caches
+
+6️⃣ LLD (Low-Level Design)
+    Classes
+    URLService
+      - createShortURL()
+      - getLongURL()
+    
+    URLRepository
+      - save()
+      - findByShortCode()
+    
+    CacheService
+      - get()
+      - set()
+7️⃣ Interview 5-Minute Script (Memorize This)
+"I would design the URL shortener as a highly available read-heavy system.
+The core idea is mapping short_code to long_url stored in a distributed database.
+For short code generation, I would use auto-increment ID + Base62 encoding to avoid collisions.
+Since redirection traffic is very high, I would use Redis cache to reduce DB load.
+For scalability, I would use load balancers, read replicas, and horizontal scaling.
+Analytics would be processed asynchronously via Kafka to avoid impacting redirect latency."
+
+8️⃣ Common Interview Follow-Ups
+❓ How to make it globally available?
+      CDN
+      Geo DNS
+      Multi-region DB replication
+
+❓ How to delete URLs?
+Soft delete flag
+Background cleanup job
+
+❓ How to support custom alias?
+Validate uniqueness
+Store as short_code directly
+
+___________________________________________HLD interview____________________________________________
+HLD diagram explanation in interview format
+
+🧩 1️⃣ Start With the Big Picture
+    🎤 How to Start in Interview
+    “I’ll design a highly available, low-latency URL shortener system similar to services like Bitly. Since this is a read-heavy system, my design will optimize redirection performance while ensuring scalability.”
+
+🏗 2️⃣ Walk Through Each Component (Left → Right)
+🔹 1. Client Layer
+    Browser / Mobile App
+    Two APIs:
+    POST /shorten
+    GET /{short_code}
+
+🔹 2. Load Balancer
+    “All traffic first goes to a Load Balancer.”
+    Responsibilities:
+        Distribute traffic
+        Health checks
+        Auto-scale support
+        This ensures high availability.
+
+🔹 3. Application Servers
+      Stateless services.
+        Two major flows:
+        
+            🟢 A. URL Creation Flow
+                Receive long URL
+                Generate unique short code
+                Store mapping in DB
+                Return short URL
+            
+            🔵 B. Redirect Flow (Critical Path)
+                Receive short code
+                Check Redis cache
+                If cache hit → return redirect (HTTP 301/302)
+                If miss → query DB → update cache → redirect
+                “Since redirect is latency-sensitive, cache lookup is mandatory.”
+
+🔹 4. Cache Layer (Redis)
+    Why Redis?
+    O(1) lookup
+    Sub-millisecond latency
+    Reduces DB load drastically
+    “Since redirection is 1000x more frequent than creation, caching gives huge performance improvement.”
+    
+    Cache stores:
+    short_code → long_url
+
+🔹 5. Database Layer
+      Primary DB (e.g., MySQL / PostgreSQL)
+      Stores:
+      | id | short_code | long_url | created_at | expiry |
+      Important:
+      Index on short_code
+      Read replicas for scaling
+      Partitioning by ID or date
+
+🔹 6. Analytics (Async Processing)
+    We don’t update click count synchronously.
+    Instead:
+    Redirect happens instantly.
+    Event pushed to queue (Kafka).
+    Background workers process:
+    Click count
+    Geo tracking
+    Device tracking
+    “This prevents analytics from increasing redirect latency.”
+
+🔁 3️⃣ Explain Both Flows Clearly
+        🟢 URL Creation Flow
+        Client → LB → App Server
+                  ↓
+             Generate ID
+                  ↓
+             Convert to Base62
+                  ↓
+                Store in DB
+                  ↓
+            Return short URL
+
+        🔵 Redirect Flow (Optimized Path)
+        Client → LB → App Server
+                  ↓
+              Redis Lookup
+               /       \
+           HIT          MISS
+           ↓              ↓
+         Redirect      DB Lookup
+                        ↓
+                   Update Cache
+                        ↓
+                     Redirect
+“Most requests should be cache hits.”
+
+📊 4️⃣ Scalability Explanation (Very Important)
+      Say this clearly:
+      
+      Horizontal Scaling
+      App servers can scale independently.
+      Redis cluster for large scale.
+      DB read replicas for read-heavy workload.
+      Storage Growth
+      Billions of records
+      
+      Use:
+      Sharding by ID
+      Partitioning by time
+
+🌍 5️⃣ Global Availability (Advanced)
+      If interviewer pushes further:
+      Add:
+      CDN for faster redirection
+      Geo-DNS
+      Multi-region DB replication
+
+⚠ 6️⃣ Bottlenecks & Solutions (Interview Gold)
+      Problem	Solution
+      DB overload	Redis caching
+      Hot keys	Redis replication
+      Short code collision	Base62 + auto-increment ID
+      Spam URLs	Rate limiting + blacklist
+      High traffic spikes	Auto-scaling
+🧠 7️⃣ How to Conclude in Interview*****************CONCLUDE*******************
+      “So overall, the system is designed as a read-optimized, horizontally scalable architecture.
+      The critical path is redirect latency, which we optimize using Redis caching.
+      Analytics and heavy operations are handled asynchronously to maintain performance.
+      The system can scale to billions of URLs using sharding and replication.”
+
+___________________________Questions _________________________________________
+This will be a complete FAANG-level URL Shortener package — exactly how a 4–6 YOE backend engineer should answer.
+
+🔥 PART 1 — 10-Minute FAANG-Level Script (Word-by-Word)
+You can literally memorize this.
+
+🎤 Step 1 — Clarify Requirements (1 min)
+      “Before designing, I’d like to clarify requirements.
+      This is a URL shortener similar to Bitly.
+      Core features:
+      
+      Create short URL from long URL
+      Redirect short URL to original
+      Optional custom alias
+      Optional expiration
+      Basic analytics
+      Non-functional requirements:
+      Very low latency redirects (<100ms)
+      High availability (99.99%)
+      Horizontally scalable to billions of URLs
+      Since this is read-heavy, I’ll optimize for redirect performance.”
+
+🎤 Step 2 — High-Level Architecture (2 min)
+
+https://substackcdn.com/image/fetch/%24s_%21QCw7%21%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F57794829-95e3-4e38-a615-34527d6cecdd_2374x1370.png
+
+https://miro.medium.com/1%2A-yciqX1QVbJV9twnVYjfHQ.png
+
+https://systemdesign.one/url-shortening-system-design/url-shortener-bloom-filter.webp
+      “At a high level, the system has:
+      Client (Browser/Mobile)
+      Load Balancer
+      Stateless Application Servers
+      Redis Cache
+      Primary Database + Read Replicas
+      Analytics pipeline via Kafka
+      I’ll now explain two flows — creation and redirection.”
+
+🎤 Step 3 — URL Creation Flow (1.5 min)
+    “User sends POST /shorten with long URL.
+    Steps:
+      1-App server generates unique ID
+      2-Converts ID to Base62
+      3-Stores mapping in DB
+      4-Returns short URL
+
+    I prefer auto-increment ID + Base62 encoding because:
+    No collision
+    Predictable capacity
+    Fast generation”
+
+🎤 Step 4 — Redirect Flow (Critical Path) (2 min)
+    “User hits short URL.
+    
+    Flow:
+    App checks Redis cache
+    If hit → redirect immediately (HTTP 301)
+    If miss → query DB → update cache → redirect
+    Since redirect traffic is 1000x higher than creation, cache is mandatory.
+    Analytics events are pushed asynchronously to Kafka so redirect latency remains minimal.”
+
+🎤 Step 5 — Database Design (1 min)
+    Table:
+    
+    | id | short_code | long_url | created_at | expiry |
+    
+    “Index on short_code is critical.
+    We use read replicas to scale reads.
+    For large scale, we shard by ID.”
+
+🎤 Step 6 — Scalability Strategy (1.5 min)
+“System scales horizontally:
+
+    App servers auto-scale
+    Redis cluster mode
+    DB sharding
+
+Since storage grows continuously, partitioning by ID ensures distributed load.
+Heavy URLs (hot keys) are handled by Redis replication.”
+
+🎤 Step 7 — Bottlenecks & Solutions (1 min)
+    “Potential bottlenecks:
+    DB overload → solved via cache
+    Hot URLs → Redis clustering
+    ID generation in distributed setup → use Snowflake IDs
+    Spam abuse → rate limiting + CAPTCHA
+    This makes the system highly scalable and fault tolerant.”
+
+🎤 Step 8 — Close Strongly (30 sec) _____________CONCLUDE________________________
+  “Overall, I designed a read-optimized, horizontally scalable URL shortener.
+  The key idea is minimizing redirect latency while maintaining consistency and availability.
+  The system can scale to billions of URLs with sharding and distributed caching.”
+
+🔥 PART 2 — LLD With Class Diagram
+🧩 Core Components
++------------------+
+|  URLController   |
++------------------+
+| +createURL()     |
+| +redirect()      |
++------------------+
+
++------------------+
+|  URLService      |
++------------------+
+| +generateCode()  |
+| +getLongURL()    |
++------------------+
+
++------------------+
+|  URLRepository   |
++------------------+
+| +save()          |
+| +findByCode()    |
++------------------+
+
++------------------+
+|  CacheService    |
++------------------+
+| +get()           |
+| +set()           |
++------------------+
+
++------------------+
+|  AnalyticsProducer|
++------------------+
+| +publishClick()  |
++------------------+
+🧠 Key LLD Decisions
+1️⃣ ID Generation Service
+Snowflake-based distributed ID generator
+Avoids DB bottleneck
+
+2️⃣ Cache TTL
+Frequently accessed URLs → longer TTL
+Rare URLs → shorter TTL
+
+3️⃣ Expiry Handling
+Check expiry before redirect
+Background cleanup job
+
+🔥 PART 3 — Capacity Estimation (FAANG Style)
+Assume:
+100M new URLs/month
+1B redirects/month
+
+Write QPS:
+Redirects:
+1B / (30*24*3600)
+≈ 385 QPS average
+Peak = 10x ≈ 4000 QPS
+Storage:
+Each record ≈ 500 bytes
+100M * 500B = 50GB/month
+600GB/year
+
+“So within 5 years, we may need ~3TB storage — manageable with sharding.”
+
+🔥 PART 4 — How to Handle 10M QPS 🚀
+This is senior-level answer.
+Step 1 — Edge Layer
+Use CDN:
+Edge servers cache redirect responses
+Reduce origin traffic
+
+Step 2 — Distributed Cache
+Redis Cluster
+Consistent hashing
+Partition by short_code
+
+Step 3 — Multi-Region Architecture
+https://www.cloudflare.com/img/learning/cdn/glossary/edge-server/cdn-edge-network-device.png
+https://cdn.prod.website-files.com/6544bdfdf184393c08205ae6/67127491cfe525e44f313350_277cf8f5.jpeg
+
+Geo-DNS routing
+Regional app clusters
+Regional Redis
+Global DB replication
+
+Step 4 — Hot Key Handling
+If one URL gets 5M QPS:
+Replicate cache entry across nodes
+Enable local in-memory cache in app server
+
+Step 5 — Database Strategy
+Sharded DB
+Partition by hash(short_code)
+No cross-shard queries
+ -------------------------------------FOllow UP Qusetions-------------------------
+🔥 PART 5 — Follow-Up Questions + Strong Answers
+❓ How do you prevent duplicate long URLs?
+Maintain unique index on long_url.
+Return existing short URL if found.
+
+❓ How to support custom alias?
+Validate uniqueness.
+Store alias as short_code directly.
+Reject if already taken.
+
+❓ What if Redis crashes?
+Cache miss falls back to DB.
+Redis replication + persistence enabled.
+
+❓ How to make it eventually consistent?
+Click count updated asynchronously.
+Minor delay acceptable for analytics.
+
+❓ How to prevent enumeration attacks?
+Use non-sequential IDs.
+Add random bits to Base62.
+Rate limit suspicious IPs.
+
+❓ How to delete URLs?
+Soft delete flag.
+Background cleanup.
+
+❓ How to handle malicious URLs?
+Integrate domain blacklist service.
+Scan via safe browsing API.
+
+
+_________-------------------Questiosn_________________________
+🔥 1️⃣ How to Handle Hot URLs?
+Problem: One short URL suddenly receives millions of requests (celebrity tweet, marketing campaign).
+
+    🚨 Why it’s dangerous
+    Single Redis key becomes hotspot
+    One DB shard overloaded
+    One cache node CPU spikes
+    
+    ✅ Solution Strategy (Layered Defense)
+    1️⃣ CDN Caching (First Line of Defense)
+
+https://www.researchgate.net/publication/329333997/figure/fig2/AS%3A698837735837696%401543627308598/Edge-CDN-Cache-Architecture-This-figure-represents-right-top-square-of-Fig-1.ppm
+
+  https://www.cloudflare.com/img/learning/cdn/glossary/edge-server/cdn-edge-network-device.png
+  “Since redirect response is simple HTTP 301 with Location header, it can be cached at CDN.”
+  
+  Edge servers serve redirect directly
+  Origin traffic drops drastically
+  Best solution for global scale
+
+2️⃣ Redis Replication / Clustering
+    Instead of one Redis node:
+    Redis Cluster mode
+    Replicate hot key to multiple nodes
+    Use consistent hashing
+
+3️⃣ Application-Level Local Cache
+    For extremely hot URLs:
+    Add in-memory cache (Caffeine / Guava)
+    Avoid even Redis lookup
+
+4️⃣ Load Balancing + Autoscaling
+  Scale app servers horizontally
+
+  Use auto-scaling groups
+
+5️⃣ Shard by Hash, Not Sequential ID
+--Ensures hot keys distributed evenly.
+
+🎤 Strong Interview Closing Line  ---------------hot URL closure-----------
+“Hot URLs are handled primarily via CDN edge caching.
+If traffic still reaches origin, Redis clustering and local in-memory caching ensure no single node becomes bottleneck.”
+
+🔥 2️⃣ How to Prevent Duplicate URLs?
+Problem: Same long URL shortened multiple times → storage waste.
+
+✅ Option 1 — Unique Constraint on long_url
+Add:
+UNIQUE INDEX on long_url
+Flow:
+Check if URL exists
+If yes → return existing short code
+If no → create new
+
+⚠ Problem
+Checking DB every time adds latency.
+✅ Better Approach — Hash-Based Lookup
+Store:
+long_url_hash → short_code
+Flow:
+Compute SHA-256 hash of long URL
+Check hash index
+Return existing mapping if present
+Fast and scalable.
+
+🎤 Interview Answer
+“I’d maintain a unique index on long_url or its hash.
+During creation, I first check existence.
+If found, I return existing short URL instead of creating duplicate.”
+
+🔥 3️⃣ How to Generate Short Codes in Distributed Systems?
+This is critical for senior interviews.
+
+❌ Bad Approach
+Auto-increment ID from single DB.
+
+Why?
+Bottleneck
+Single point of failure
+
+✅ Production Approach — Snowflake ID Generator
+
+https://media2.dev.to/dynamic/image/width%3D800%2Cheight%3D%2Cfit%3Dscale-down%2Cgravity%3Dauto%2Cformat%3Dauto/https%3A%2F%2Fkrypton.ninja%2Fstatic%2Fblog%2Fgenerating-unique-ids-with-the-snowflake-algorithm%2Fspaceflake_network.png
+
+https://assets.bytebytego.com/diagrams/0006-explaining-5-unique-id-generators-in-distributed-systems.png
+
+https://miro.medium.com/v2/resize%3Afit%3A1400/0%2AFjaig-LWjN1058HU
+4
+Snowflake ID =
+
+timestamp + machine_id + sequence_number
+Benefits:
+Globally unique
+No DB dependency
+Scales horizontally
+
+Then:
+Convert ID → Base62 → short code
+
+✅ Alternative: Pre-Generate ID Ranges
+Central service allocates ID blocks
+
+Each server generates locally
+
+🎤 Strong Interview Line
+“To avoid centralized bottlenecks, I’d use a distributed ID generator like Snowflake, then encode the ID using Base62.”
+
+🔥 4️⃣ How to Design Rate Limiting?
+Problem: Prevent spam / abuse / brute-force attacks.
+
+Types of Rate Limiting
+1️⃣ IP-based
+Limit requests per IP.
+
+2️⃣ User-based
+Limit per authenticated user.
+
+Algorithms
+Algorithm	Use Case
+Fixed Window	Simple
+Sliding Window	More accurate
+Token Bucket	Production preferred
+Recommended: Token Bucket (Using Redis)
+Store per key:
+
+user_id → tokens_remaining
+Each request:
+
+Consume token
+
+If empty → reject (429 Too Many Requests)
+
+Redis Lua script ensures atomicity.
+
+🎤 Interview Answer
+“I’d implement rate limiting at API gateway level using Token Bucket algorithm backed by Redis.
+This ensures atomic updates and protects against abuse.”
+
+🔥 5️⃣ How to Make It Eventually Consistent?
+Strong consistency not required for analytics.
+
+What Needs Eventual Consistency?
+Click count
+
+Geo stats
+
+Device stats
+
+Architecture
+Redirect → Push event to Kafka
+           ↓
+      Consumer workers
+           ↓
+      Update analytics DB
+Why This Works
+Redirect stays fast
+
+Analytics slightly delayed
+
+System scalable
+
+🎤 Strong Interview Answer
+“The core URL mapping remains strongly consistent.
+However, analytics and click counts are updated asynchronously via Kafka consumers, making the system eventually consistent for non-critical data.”
+
+🔥 Quick FAANG Summary Table
+Question	Ideal Answer Direction
+Hot URLs	CDN + Redis cluster + local cache
+Duplicate URLs	Unique hash index
+Distributed code gen	Snowflake + Base62
+Rate limiting	Token bucket via Redis
+Eventual consistency	Async analytics via Kafka
+🎯 What FAANG Interviewers Actually Look For
+They want to see:
+
+Layered defense thinking
+
+Bottleneck awareness
+
+Tradeoff reasoning
+
+Scalable mindset
+
+Not just buzzwords.
+
+
+-------------------------------------------------------------------
+
+1️⃣ SQL vs NoSQL comparison
+2️⃣ Microservices vs Monolith tradeoff
+3️⃣ Full mock FAANG-style interview simulation
+
+🔥 PART 1 — SQL vs NoSQL for URL Shortener
+🧠 What Are We Storing?
+Core data:
+
+short_code → long_url
+Characteristics:
+Simple key-value mapping
+Read-heavy
+Massive scale
+Minimal joins
+
+🟢 Option 1 — SQL (MySQL / PostgreSQL)
+Pros
+Strong consistency (ACID)
+Easy uniqueness constraint
+Mature indexing
+Good for small-medium scale
+Easy duplicate prevention
+
+Cons
+Vertical scaling limits
+Sharding complexity
+Write bottlenecks if not designed well
+
+When SQL is Ideal
+Moderate scale (< billions)
+Need strict consistency
+Team familiar with RDBMS
+
+🔵 Option 2 — NoSQL (Cassandra / DynamoDB)
+Pros
+Horizontal scaling built-in
+High write throughput
+Designed for key-value lookups
+Automatic partitioning
+
+Cons
+Eventual consistency (configurable)
+Harder duplicate prevention
+Limited querying flexibility
+
+🎯 Architecture Comparison
+
+https://www.mysql.com/common/images/products/MySQL_Cluster_Scalability_v1.png
+
+https://cassandra.apache.org/_/_images/diagrams/apache-cassandra-diagrams-01.jpg
+🔥 FAANG-Level Answer
+“If scale is moderate and consistency is important, I’d choose SQL with sharding.
+If the system needs to support billions of records and massive write throughput, I’d choose NoSQL like Cassandra because it’s designed for distributed key-value access.”
+
+🏆 What Big Companies Likely Use?
+Bitly-type systems → likely NoSQL
+
+Internal tools → often SQL + sharding
+
+🔥 PART 2 — Microservices vs Monolith
+🟢 Monolith Architecture
+Single application handling:
+URL creation
+Redirect
+Analytics
+Rate limiting
+
+Pros
+Simple to build
+Easy deployment
+Low operational overhead
+Faster development initially
+
+Cons
+Harder to scale components independently
+Large codebase over time
+Risky deployments
+
+🔵 Microservices Architecture
+Split into:
+URL Service
+Redirect Service
+Analytics Service
+Rate Limiter Service
+ID Generator Service
+Architecture Visualization
+https://miro.medium.com/v2/resize%3Afit%3A1400/1%2AaSdnOJNT2UoiaAhy-vuV_Q.png
+
+https://miro.medium.com/1%2AJIDAhbsGGTztmcJ6OxNkrg.png
+
+https://miro.medium.com/1%2AwueZLPaGKr5iMOLHRfoYHQ.png
+4
+Pros
+Independent scaling
+Fault isolation
+Team ownership
+
+Flexible technology stack
+
+Cons
+Operational complexity
+Network latency
+Distributed tracing needed
+DevOps heavy
+
+🎯 FAANG-Level Answer_______________________================modular monolith___============================
+“I would start with a modular monolith.
+Once traffic grows and analytics becomes heavy, I’d extract analytics into a separate microservice.
+Microservices make sense when different components scale differently.”
+
+
+=====================================Q/A======================================
+👨‍💼 Interviewer: “Design a URL Shortener.”
+👩‍💻 You:
+“Sure. I’ll start with clarifying requirements…”
+
+(You already have 10-min script from earlier.)
+
+🔥 Follow-Up Round
+❓ Interviewer: “How would you scale to 10M QPS?”
+✅ Strong Answer:
+“At that scale, I’d push caching to the edge via CDN.
+Redirect responses are cacheable, so majority traffic never reaches origin.
+For remaining traffic, Redis cluster with consistent hashing handles lookups.
+Database is sharded by hash(short_code).
+Multi-region deployment with geo-DNS ensures global distribution.”
+
+❓ Interviewer: “What if one URL gets 5M QPS?”
+✅ Strong Answer:
+“That becomes a hot key problem.
+I’d cache redirect response at CDN layer.
+Additionally, replicate hot key across Redis nodes and use local in-memory cache in app servers.”
+
+❓ Interviewer: “How do you generate IDs without collisions?”
+✅ Strong Answer:
+“I’d use Snowflake distributed ID generation, which embeds timestamp, machine ID, and sequence number.
+This guarantees uniqueness without centralized bottleneck.”
+
+❓ Interviewer: “How do you prevent abuse?”
+✅ Strong Answer:
+“Rate limiting using Token Bucket algorithm via Redis.
+Also domain blacklisting and CAPTCHA for suspicious traffic.”
+
+❓ Interviewer: “What consistency model would you choose?”
+✅ Strong Answer:
+“Strong consistency for URL mapping.
+Eventual consistency for analytics since click count can tolerate slight delay.”
+
+❓ Interviewer: “Would you choose SQL or NoSQL?”
+✅ Strong Answer:
+“If expecting billions of URLs and heavy distributed writes, I’d use NoSQL like Cassandra.
+For moderate scale and strict constraints, SQL with sharding works well.”
+
+🔥 What Makes This FAANG-Level?
+You:
+
+Think in layers
+Talk about bottlenecks
+Mention tradeoffs
+Separate critical vs non-critical paths
+Avoid overengineering
+
+==================================HLD=======================================
+🔥 1️⃣ HLD Diagram Explanation (Interview Format – Word by Word)
+🎤 Step 1 — Start With Requirements (1 min)
+“I’ll design a URL shortening system similar to Bitly.
+Functional requirements:
+Generate short URL
+Redirect to original URL
+Optional custom alias
+Optional expiration
+Basic analytics
+Non-functional:
+Very low latency redirects (<100ms)
+High availability (99.99%)
+Horizontally scalable to billions of URLs
+Since this is read-heavy, I’ll optimize redirect path.”
+
+🎤 Step 2 — Draw HLD
+🎤 Step 3 — Explain Components Clearly
+1️⃣ Client
+Browser or mobile app calling:
+POST /shorten
+GET /{short_code}
+
+2️⃣ Load Balancer
+Distributes traffic
+Health checks
+Enables horizontal scaling
+
+3️⃣ Application Servers (Stateless)
+Two flows:
+
+    🟢 Creation Flow
+        Generate unique ID
+        Convert to Base62
+        Store in DB
+        Return short URL
+    
+    🔵 Redirect Flow (Critical Path)
+        Check Redis
+        If hit → redirect
+        If miss → DB → update cache → redirect
+        “Cache is critical because redirect traffic is much higher than creation.”
+
+4️⃣ Redis Cache
+  Stores:
+  short_code → long_url
+  Sub-millisecond lookup
+  Reduces DB load drastically
+
+5️⃣ Database
+    Stores persistent mapping.
+    Indexed by short_code
+    Read replicas
+    Sharded at scale
+
+6️⃣ Analytics (Async)
+    Redirect → push event to Kafka → background consumers update analytics DB.
+    “Analytics must not affect redirect latency.”
+
+🎤 Closing Line
+“This design ensures low latency, high availability, and horizontal scalability.”
+
+=============================LLD===========================
+
+🔥 2️⃣ Complete LLD With Class Diagram
+🧩 Core Class Diagram (Conceptual)
++----------------------+
+| URLController        |
++----------------------+
+| +createShortURL()    |
+| +redirectToLongURL() |
++----------------------+
+
++----------------------+
+| URLService           |
++----------------------+
+| +generateShortCode() |
+| +getLongURL()        |
+| +validateExpiry()    |
++----------------------+
+
++----------------------+
+| IDGeneratorService   |
++----------------------+
+| +generateID()        |
++----------------------+
+
++----------------------+
+| URLRepository        |
++----------------------+
+| +save()              |
+| +findByShortCode()   |
+| +findByHash()        |
++----------------------+
+
++----------------------+
+| CacheService         |
++----------------------+
+| +get()               |
+| +set()               |
++----------------------+
+
++----------------------+
+| AnalyticsProducer    |
++----------------------+
+| +publishClickEvent() |
++----------------------+
+🧠 Key LLD Decisions
+1️⃣ ID Generation
+Snowflake ID generator
+No central DB dependency
+
+2️⃣ Base62 Encoding
+Converts numeric ID to short string.
+
+3️⃣ Expiry Validation
+Checked during redirect
+Background cleanup job deletes expired entries
+
+4️⃣ Duplicate Prevention
+Maintain hash(long_url)
+Unique index
+
+🔥 3️⃣ Production-Level Architecture (FAANG Style)
+This is how it would look at large scale.
+
+🌍 Multi-Region Distributed Architecture
+
+https://d2908q01vomqb2.cloudfront.net/fc074d501302eb2b93e2554793fcaf50b3bf7291/2022/04/01/Figure-3.-Building-an-application-with-AWS-multi-Region-services-using-services-covered-in-Part-1.png
+
+https://www.researchgate.net/publication/329333997/figure/fig2/AS%3A698837735837696%401543627308598/Edge-CDN-Cache-Architecture-This-figure-represents-right-top-square-of-Fig-1.ppm
+Layers
+1️⃣ CDN (Cloudflare/Akamai)
+Edge caching for hot URLs
+Reduces origin traffic massively
+
+2️⃣ Global Load Balancer (Geo-DNS)
+Routes user to nearest region.
+
+3️⃣ Regional Clusters
+Each region has:
+App servers
+Redis cluster
+DB shard
+
+4️⃣ Database
+Sharded by hash(short_code)
+Replicated within region
+Asynchronous cross-region replication
+
+5️⃣ Event Streaming
+Kafka cluster
+Analytics consumers
+Separate analytics database
+Production Considerations
+Circuit breakers
+Retry mechanisms
+Observability (metrics + tracing)
+Autoscaling
+Rate limiting at API gateway
+
+🔥 4️⃣ SQL Schema + Redis Strategy
+🗄 SQL Schema
+CREATE TABLE urls (
+    id BIGINT PRIMARY KEY,
+    short_code VARCHAR(10) UNIQUE NOT NULL,
+    long_url TEXT NOT NULL,
+    long_url_hash VARCHAR(64) UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expiry_at TIMESTAMP,
+    user_id BIGINT,
+    is_deleted BOOLEAN DEFAULT FALSE
+);
+
+CREATE INDEX idx_short_code ON urls(short_code);
+CREATE INDEX idx_long_url_hash ON urls(long_url_hash);
+    🔴 Redis Strategy
+    Key Design
+    Key: short:{short_code}
+    Value: long_url
+    TTL: expiry time (if exists)
+    Example:
+    
+    short:Ab3Xk → https://google.com
+    Hot URL Strategy
+    Longer TTL
+    Replicate across Redis nodes
+    Enable Redis cluster mode
+    Cache Miss Flow
+    Lookup DB
+    Update Redis
+    Return response
+
+🔥 5️⃣ System Design Comparison: Bitly vs TinyURL
+    🟢 TinyURL (Simpler System)
+    Likely characteristics:
+    Basic mapping
+    Minimal analytics
+    Possibly SQL-based
+    Simple redirect logic
+    Limited enterprise features
+
+🔵 Bitly (Enterprise-Grade)
+
+https://support.bitly.com/hc/article_attachments/34445445993997
+
+https://malcolm-en-gb.s3.eu-west-1.amazonaws.com/instances/n9sEghF2ZC/resources/wIuU7WP1JA/account%20profile_final.PNG
+Bitly Likely Includes:
+    Massive distributed storage
+    Advanced analytics
+    Custom branded domains
+    API access
+    Spam detection
+    Real-time click tracking
+    Multi-region replication
+    Enterprise SLAs
+
+🎯 Interview-Ready Comparison Answer
+“TinyURL is likely a simpler key-value mapping system optimized for basic redirection.
+Bitly, on the other hand, is enterprise-grade — offering analytics, custom domains, rate limiting, spam detection, and multi-region distributed infrastructure.”
+
+
+
+===========================================INTERVIEW SCRIPT==================================
+👨‍💼 Interviewer:
+“Design a URL shortener like Bitly.”
+
+    👩‍💻 You (Strong Start)
+    “Sure. Before jumping into architecture, I’d like to clarify a few requirements.”
+    Functional Requirements
+    Create short URL from long URL
+    Redirect short URL → original URL
+    Optional custom alias
+    Optional expiration time
+    Basic analytics (click count)
+                          
+    Non-Functional Requirements
+    Low latency redirect (<100ms)
+    High availability (99.99%)
+    Horizontally scalable
+    Secure & abuse-resistant
+    “Is analytics real-time or eventual consistency acceptable?”
+
+👨‍💼 Interviewer: “Eventual consistency is fine.”
+
+    Good — that simplifies design.
+    
+    ⏱️ Minute 5–10: High-Level Design
+        🏗️ You Draw HLD
+        🎤 You Explain
+        “At a high level, the system has:
+        
+        Client (Browser/Mobile)
+        Load Balancer
+        Stateless App Servers
+        Redis Cache
+        Primary DB + Read Replicas
+        Kafka for analytics”
+    
+    🔵 Redirect Flow (Critical Path)
+    “User hits short URL.
+    App checks Redis.
+    If hit → return HTTP 301.
+    If miss → query DB → update cache → redirect.”
+    “Since this is read-heavy, caching is critical.”
+
+    🟢 Creation Flow
+    “User sends POST /shorten.
+    Generate distributed unique ID.
+    Convert to Base62.
+    Store mapping in DB.
+    Return short URL.”
+
+⏱️ Minute 10–15: Capacity Estimation
+👨‍💼 Interviewer:
+“How much traffic are we designing for?”
+
+  👩‍💻 You:
+      Assume:
+      100M new URLs/month
+      1B redirects/month
+      QPS Calculation
+      1B / (30*24*3600)
+      ≈ 385 QPS average
+      Peak = 10x = ~4000 QPS
+                            
+      Storage:
+      500 bytes per record
+      100M × 500B = 50GB/month
+      600GB/year
+      
+      “So within 5 years, we need ~3TB storage, manageable with sharding.”
+      
+      This shows quantitative thinking.
+      ⏱️ Minute 15–20: Deep Dive — ID Generation
+👨‍💼 Interviewer:
+“How do you generate short codes in distributed systems?”
+
+👩‍💻 You:
+“Auto-increment from DB won’t scale.
+I’d use Snowflake ID generation.”
+Snowflake Architecture
+
+https://media2.dev.to/dynamic/image/width%3D800%2Cheight%3D%2Cfit%3Dscale-down%2Cgravity%3Dauto%2Cformat%3Dauto/https%3A%2F%2Fkrypton.ninja%2Fstatic%2Fblog%2Fgenerating-unique-ids-with-the-snowflake-algorithm%2Fspaceflake_network.png
+
+https://assets.bytebytego.com/diagrams/0006-explaining-5-unique-id-generators-in-distributed-systems.png
+
+https://miro.medium.com/v2/resize%3Afit%3A1400/0%2AFjaig-LWjN1058HU
+4
+“Snowflake combines:
+Timestamp
+Machine ID
+Sequence number
+It guarantees uniqueness without centralized bottleneck.
+Then I encode ID using Base62.”
+That’s a strong senior-level answer.
+
+⏱️ Minute 20–25: Hot URL Problem
+👨‍💼 Interviewer:
+“What if one URL gets 5M QPS?”
+
+👩‍💻 You:
+    “That becomes a hot key issue.”
+    Solutions:
+    CDN caching at edge
+    Redis clustering
+    Replicate hot keys
+    Local in-memory caching
+    Autoscaling app servers
+    Edge Caching Layer
+    https://www.researchgate.net/publication/329333997/figure/fig2/AS%3A698837735837696%401543627308598/Edge-CDN-Cache-Architecture-This-figure-represents-right-top-square-of-Fig-1.ppm
+    
+    https://www.cloudflare.com/img/learning/cdn/glossary/edge-server/cdn-edge-network-device.png
+    “Most traffic should be absorbed at CDN layer.”
+    
+    That’s production thinking.
+
+⏱️ Minute 25–30: Database Design
+👩‍💻 You Draw Schema
+CREATE TABLE urls (
+    id BIGINT PRIMARY KEY,
+    short_code VARCHAR(10) UNIQUE,
+    long_url TEXT NOT NULL,
+    long_url_hash VARCHAR(64) UNIQUE,
+    created_at TIMESTAMP,
+    expiry_at TIMESTAMP
+);
+“Index on short_code is critical.
+long_url_hash helps prevent duplicates.”
+
+👨‍💼 Interviewer:
+“SQL or NoSQL?”
+
+👩‍💻 You:
+    “If scale is moderate, SQL with sharding works.
+    For massive global scale, I’d use Cassandra or DynamoDB since they’re designed for distributed key-value access.”
+
+    Balanced answer = maturity.
+
+⏱️ Minute 30–35: Rate Limiting & Abuse
+👨‍💼 Interviewer:
+“How do you prevent abuse?”
+
+👩‍💻 You:
+    “I’d implement rate limiting at API gateway using Token Bucket algorithm backed by Redis.”
+    IP-based limit
+    User-based limit
+    CAPTCHA for suspicious traffic
+    Domain blacklist
+                      
+⏱️ Minute 35–40: Consistency Model
+👨‍💼 Interviewer:
+“How do you handle analytics updates?”
+
+👩‍💻 You:
+    “Redirect must be strongly consistent.
+    Analytics can be eventually consistent.”
+    
+    Flow:
+    Redirect → Publish event to Kafka
+             → Consumer updates click count
+    No latency impact.
+                      
+⏱️ Minute 40–43: Multi-Region Architecture
+Global Deployment
+
+https://d2908q01vomqb2.cloudfront.net/fc074d501302eb2b93e2554793fcaf50b3bf7291/2022/04/01/Figure-3.-Building-an-application-with-AWS-multi-Region-services-using-services-covered-in-Part-1.png
+
+https://www.vmware.com/media/blt8c9a8aaca0ffd4ac/blt550f5e1123f805c0/66d17dd742d82e5f404161f5/DNS-load-balancing-diagram-2.png
+    “Use:
+    
+    Geo-DNS routing
+    Regional app clusters
+    Regional Redis
+    Sharded DB
+    Cross-region replication”
+
+⏱️ Minute 43–45: Strong Closing
+👩‍💻 You:
+    “To summarize:
+    Optimized redirect path with Redis + CDN
+    Distributed ID generation via Snowflake
+    Sharded database for scale
+    Async analytics via Kafka
+    Rate limiting and abuse protection
+    This system can scale from thousands to millions of QPS while maintaining low latency and high availability.”
+
+
+========================================LLD working=======================
+
+We’ll cover:
+
+1️⃣ Component-level design
+2️⃣ Class diagram (clean version)
+3️⃣ Detailed sequence flow (Create + Redirect)
+4️⃣ Thread safety & concurrency
+5️⃣ Edge cases
+6️⃣ Production-grade improvements
+
+🔥 1️⃣ LLD Overview – What Are We Designing?
+We are designing the core URL Shortener service layer, including:
+
+Controller
+Service layer
+ID Generator
+Repository
+Cache
+Analytics publisher
+
+🔥 2️⃣ Clean LLD Class Diagram
++--------------------------+
+| URLController            |
++--------------------------+
+| +createShortURL(req)     |
+| +redirect(shortCode)     |
++--------------------------+
+              |
+              v
++--------------------------+
+| URLService               |
++--------------------------+
+| +create(longUrl)         |
+| +getLongURL(shortCode)   |
+| +validateExpiry(url)     |
++--------------------------+
+     |           |          |
+     v           v          v
++-----------+ +-----------+ +------------------+
+| IDGenSvc  | | CacheSvc  | | URLRepository    |
++-----------+ +-----------+ +------------------+
+|+generate()| |+get()     | |+save()           |
+|           | |+set()     | |+findByShortCode()|
++-----------+ +-----------+ |+findByHash()     |
+                             +------------------+
+
+              |
+              v
++--------------------------+
+| AnalyticsProducer        |
++--------------------------+
+| +publishClickEvent()     |
++--------------------------+
+                      
+🔥 3️⃣ LLD WORKING – Step by Step Execution
+Now let’s simulate real runtime behavior.
+
+🟢 FLOW 1 — Create Short URL
+Step 1: API Call
+POST /shorten
+Body: { longUrl: "https://google.com" }
+Controller:
+
+public ShortUrlResponse createShortURL(CreateRequest request) {
+    return urlService.create(request.getLongUrl());
+}
+Step 2: Service Layer Logic
+public ShortUrlResponse create(String longUrl) {
+
+    String hash = hashUtil.sha256(longUrl);
+
+    URL existing = repository.findByHash(hash);
+    if (existing != null) {
+        return new ShortUrlResponse(existing.getShortCode());
+    }
+
+    long id = idGenerator.generate();
+
+    String shortCode = base62Encoder.encode(id);
+
+    URL url = new URL(id, shortCode, longUrl, hash);
+
+    repository.save(url);
+
+    return new ShortUrlResponse(shortCode);
+}
+🔥 Important Design Points
+Hash prevents duplicates
+
+IDGenerator prevents DB bottleneck
+
+Base62 ensures compact URL
+
+Repository handles DB logic
+
+🔵 FLOW 2 — Redirect Working
+Step 1: API Call
+GET /Ab3Xk
+Controller:
+
+public void redirect(String shortCode) {
+    String longUrl = urlService.getLongURL(shortCode);
+    response.sendRedirect(longUrl);
+}
+Step 2: Service Logic
+public String getLongURL(String shortCode) {
+
+    String cached = cacheService.get(shortCode);
+    if (cached != null) {
+        analyticsProducer.publishClickEvent(shortCode);
+        return cached;
+    }
+
+    URL url = repository.findByShortCode(shortCode);
+
+    if (url == null || validateExpiry(url)) {
+        throw new NotFoundException();
+    }
+
+    cacheService.set(shortCode, url.getLongUrl());
+
+    analyticsProducer.publishClickEvent(shortCode);
+
+    return url.getLongUrl();
+}
+🔥 What Happens Internally?
+If Cache Hit
+      1 Redis lookup
+      1 async Kafka event
+      Redirect
+
+If Cache Miss
+    DB lookup
+    Cache update
+    Kafka publish
+    Redirect
+
+🔥 4️⃣ Thread Safety & Concurrency
+This is where senior-level thinking shows.
+
+🧠 Problem 1 — Duplicate Creation Race
+Two requests simultaneously try to shorten same URL.
+
+Solution:
+Unique index on long_url_hash
+Catch DB duplicate exception
+Fetch existing row
+
+🧠 Problem 2 — Cache Stampede
+Many users hit uncached URL at same time.
+
+Solution:
+Use Redis SETNX (lock)
+Or use request coalescing
+Or small random TTL jitter
+
+🔥 5️⃣ Expiry Handling
+Each URL has:
+
+expiry_at
+During redirect:
+
+private boolean validateExpiry(URL url) {
+    return url.getExpiryAt() != null &&
+           url.getExpiryAt().isBefore(now());
+}
+Expired URLs:
+
+Return 404
+
+Or redirect to custom expired page
+
+Background job:
+
+Periodically delete expired rows
+
+🔥 6️⃣ Rate Limiting LLD
+Add:
+
+RateLimiterService
+boolean allowRequest(String userId) {
+    return redisTokenBucket.consume(userId);
+}
+Executed before service call.
+
+🔥 7️⃣ Analytics LLD
+Redirect → Kafka Topic: click-events
+          → Analytics Consumer
+          → Update Click Count DB
+Click update not in main thread.
+
+🔥 8️⃣ Redis Key Strategy
+Key: short:{code}
+Value: longUrl
+TTL: expiry time
+Example:
+
+short:Ab3Xk → https://google.com
+For hot URLs:
+
+Long TTL
+
+Or no expiry
+
+🔥 9️⃣ Production-Level LLD Improvements
+Circuit Breaker
+If DB is slow → fail fast.
+
+Observability
+Add:
+Metrics (QPS, cache hit ratio)
+Logging
+Distributed tracing
+Retry Logic
+For transient DB errors.
+
+Idempotency Key
+For creation API.
+
+🔥 10️⃣ How Interviewer Evaluates LLD
+They check:
+
+✔ Separation of concerns
+✔ Thread safety
+✔ Race condition handling
+✔ Edge case awareness
+✔ Clean architecture
+
+🎯 Final Strong Summary Line
+In interview, you conclude:
+
+“The LLD separates controller, service, repository, cache, and analytics.
+It handles concurrency using unique constraints and distributed ID generation.
+Redirect is optimized for cache hits, and heavy operations are async.”
+
+
+
+========= Python LLD===============
+🔥 Production-Style Python Implementation (FastAPI + Redis + PostgreSQL)
+We’ll design this properly:
+
+app/
+ ├── main.py
+ ├── controllers.py
+ ├── service.py
+ ├── repository.py
+ ├── cache.py
+ ├── id_generator.py
+ ├── models.py
+ └── utils.py
+🔥 1️⃣ Database Model (PostgreSQL)
+# models.py
+from sqlalchemy import Column, String, BigInteger, Text, DateTime, Boolean
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
+
+class URL(Base):
+    __tablename__ = "urls"
+
+    id = Column(BigInteger, primary_key=True)
+    short_code = Column(String(10), unique=True, index=True)
+    long_url = Column(Text, nullable=False)
+    long_url_hash = Column(String(64), unique=True, index=True)
+    created_at = Column(DateTime)
+    expiry_at = Column(DateTime)
+    is_deleted = Column(Boolean, default=False)
+🔥 2️⃣ Distributed ID Generator (Simple Version)
+In production → use Snowflake
+For now → simple timestamp + random.
+
+# id_generator.py
+import time
+import random
+
+class IDGenerator:
+    @staticmethod
+    def generate():
+        return int(str(int(time.time() * 1000)) + str(random.randint(100, 999)))
+🔥 3️⃣ Base62 Encoder
+# utils.py
+import string
+
+BASE62 = string.ascii_letters + string.digits
+
+def encode_base62(num):
+    if num == 0:
+        return BASE62[0]
+
+    arr = []
+    base = len(BASE62)
+
+    while num:
+        num, rem = divmod(num, base)
+        arr.append(BASE62[rem])
+
+    arr.reverse()
+    return ''.join(arr)
+🔥 4️⃣ Repository Layer
+# repository.py
+from sqlalchemy.orm import Session
+from models import URL
+
+class URLRepository:
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def find_by_hash(self, url_hash):
+        return self.db.query(URL).filter_by(long_url_hash=url_hash).first()
+
+    def find_by_short_code(self, code):
+        return self.db.query(URL).filter_by(short_code=code).first()
+
+    def save(self, url: URL):
+        self.db.add(url)
+        self.db.commit()
+        self.db.refresh(url)
+        return url
+🔥 5️⃣ Redis Cache Layer
+# cache.py
+import redis
+
+redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
+
+class CacheService:
+
+    @staticmethod
+    def get(short_code):
+        return redis_client.get(f"short:{short_code}")
+
+    @staticmethod
+    def set(short_code, long_url, ttl=None):
+        redis_client.set(f"short:{short_code}", long_url, ex=ttl)
+🔥 6️⃣ Service Layer (Core Logic)
+# service.py
+import hashlib
+from models import URL
+from id_generator import IDGenerator
+from utils import encode_base62
+from cache import CacheService
+from datetime import datetime
+
+class URLService:
+
+    def __init__(self, repository):
+        self.repository = repository
+
+    def create(self, long_url):
+        url_hash = hashlib.sha256(long_url.encode()).hexdigest()
+
+        existing = self.repository.find_by_hash(url_hash)
+        if existing:
+            return existing.short_code
+
+        id_value = IDGenerator.generate()
+        short_code = encode_base62(id_value)
+
+        url = URL(
+            id=id_value,
+            short_code=short_code,
+            long_url=long_url,
+            long_url_hash=url_hash,
+            created_at=datetime.utcnow()
+        )
+
+        self.repository.save(url)
+        return short_code
+
+    def get_long_url(self, short_code):
+
+        # 1️⃣ Check cache
+        cached = CacheService.get(short_code)
+        if cached:
+            return cached
+
+        # 2️⃣ DB lookup
+        url = self.repository.find_by_short_code(short_code)
+
+        if not url or url.is_deleted:
+            return None
+
+        # 3️⃣ Cache it
+        CacheService.set(short_code, url.long_url, ttl=3600)
+
+        return url.long_url
+🔥 7️⃣ FastAPI Controller
+# main.py
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+from service import URLService
+from repository import URLRepository
+
+app = FastAPI()
+
+@app.post("/shorten")
+def create_short_url(long_url: str, db: Session = Depends(get_db)):
+    repo = URLRepository(db)
+    service = URLService(repo)
+
+    short_code = service.create(long_url)
+    return {"short_url": f"http://localhost:8000/{short_code}"}
+
+
+@app.get("/{short_code}")
+def redirect(short_code: str, db: Session = Depends(get_db)):
+    repo = URLRepository(db)
+    service = URLService(repo)
+
+    long_url = service.get_long_url(short_code)
+
+    if not long_url:
+        raise HTTPException(status_code=404, detail="URL not found")
+
+    return RedirectResponse(url=long_url)
+🔥 What This Implementation Covers
+✅ Clean layered architecture
+✅ Cache-first redirect
+✅ Duplicate prevention
+✅ Base62 encoding
+✅ Redis caching
+✅ PostgreSQL storage
+✅ Production-ready structure
+
+🚀 For Real Production
+You would additionally add:
+Snowflake ID service
+Async Kafka analytics
+Rate limiting middleware
+API gateway
+Logging & monitoring
+Docker + Kubernetes
+Load balancer
+CDN
+
+🎯 Interview Tip
+If interviewer asks:
+“Can you implement it?”
+
+You say:
+“Yes, I would use FastAPI with SQLAlchemy, Redis for caching, Snowflake ID generation, and async Kafka for analytics.”
+That sounds strong and practical.
+
+
+
+
+class URLShortener:
+    def __init__(self):
+        self.url_map = {}
+        self.reverse_map = {}
+        self.counter = 1
+
+    def encode(self, long_url):
+        if long_url in self.reverse_map:
+            return self.reverse_map[long_url]
+
+        short_code = self._base62(self.counter)
+        self.url_map[short_code] = long_url
+        self.reverse_map[long_url] = short_code
+        self.counter += 1
+
+        return short_code
+
+    def decode(self, short_code):
+        return self.url_map.get(short_code)
+
+    def _base62(self, num):
+        chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        base = len(chars)
+        result = ""
+        while num:
+            num, rem = divmod(num, base)
+            result = chars[rem] + result
+        return result
+This is enough for LLD / coding round.
+
+
+                    
+If interviewer says:
+
+“Can you implement it?”
+You reply:
+“Sure, I’ll implement a simplified in-memory version to demonstrate core logic.”
+Then write clean minimal code.
+That shows confidence and clarity.
+
+
+
+
+================---INTERVIEW==================================================
+
+Perfect 👍 Let’s design a FAANG-level production architecture for a URL Shortener.
+
+I’ll explain this in interview format, step by step, like you would speak in a 45–60 min round.
+
+🎯 1️⃣ Requirements (Clarify First in Interview)
+    Functional Requirements
+      Shorten long URL
+      Redirect short URL → original URL
+      Custom alias (optional)
+      URL expiration (optional)
+      Analytics (click count)
+      Non-Functional Requirements
+      Highly available
+      Low latency (redirect < 50ms)
+      Handle millions of QPS
+      Scalable
+      Eventually consistent acceptable
+      No duplicate short codes
+
+🏗 2️⃣ High-Level Production Architecture
+
+https://substackcdn.com/image/fetch/%24s_%21QCw7%21%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F57794829-95e3-4e38-a615-34527d6cecdd_2374x1370.png
+
+https://miro.medium.com/1%2AV4HcNREpfchzu96PCR5HjQ.png
+
+https://blog.ishosting.com/hs-fs/hubfs/blog/api-gateway-vs-load-balancer/combining-en.png?height=986&name=combining-en.png&width=1536
+Now I’ll explain each component clearly.
+
+    “At a high level, the system has:
+    Client (Browser/Mobile)
+    Load Balancer
+    Stateless Application Servers
+    Redis Cache
+    Primary Database + Read Replicas
+    Analytics pipeline via Kafka
+
+🧱 3️⃣ Component Breakdown (Interview Explanation)
+  1️⃣ DNS
+      Domain like: short.ly
+      Points to Load Balancer
+  
+  2️⃣ Load Balancer
+      Distributes traffic across app servers
+      Prevents single point of failure
+        Examples:
+        AWS ALB
+        Nginx
+        HAProxy
+  
+  3️⃣ API Layer (Stateless App Servers)
+  Two main APIs:
+      
+      🔹 POST /shorten
+      Input: long URL
+      Output: short URL
+      
+      🔹 GET /{shortCode}
+      Redirect to original URL
+  
+  Stateless servers → horizontal scaling possible.
+  
+  4️⃣ Redis (Read-Heavy Optimization)
+  Redis stores:
+  shortCode → longURL
+  Why?  
+  Redirect is read-heavy (90% traffic)
+  Avoid hitting DB every time  
+  <1ms latency  
+    Flow for Redirect:  
+    Check Redis
+    If hit → return
+    If miss → fetch from DB → update Redis
+  
+  5️⃣ Primary Database (Persistent Store)
+  Stores durable mapping.
+  Options:
+  SQL (MySQL, PostgreSQL)
+  NoSQL (DynamoDB, Cassandra)
+  
+  Schema:
+  
+  short_code (PK)
+  long_url
+  created_at
+  expiry_time
+  user_id
+  click_count
+  6️⃣ ID Generation Service
+  Critical part.
+  We need:
+  Unique short codes
+  No collision
+  Distributed safe
+  
+  Options:
+    Option A: Auto-increment ID (SQL)
+    Convert ID → Base62
+    
+    Option B: Snowflake ID Generator
+    Globally unique
+  
+    Option C: Hash-based (not preferred at scale)
+  Best for FAANG:
+  👉 Snowflake-style distributed ID service
+
+  7️⃣ Analytics Pipeline
+  Click tracking should NOT block redirect.  
+  Better approach:
+  Redirect immediately
+  Send event to Kafka
+  Background worker processes analytics
+  Update DB asynchronously
+  This ensures low latency.
+  
+  🚀 4️⃣ Request Flow (Interview Style Explanation)
+  🔥 URL Creation Flow
+        Client → Load Balancer
+        LB → API Server
+        Check if URL already exists (duplicate prevention)
+        Generate ID
+        Convert to Base62 → shortCode
+        Store in DB
+        Cache in Redis
+        Return short URL
+  
+  🔥 Redirect Flow (Most Important)
+        Client hits short URL
+        Load Balancer routes to server
+        Server checks Redis
+        If found → 302 Redirect  
+        If not found → DB → update Redis → redirect
+        Send click event to Kafka asynchronously  
+        Latency target: < 20–50ms
+  
+  📊 5️⃣ Handling 10M QPS
+  For very high traffic:
+  ✅ Horizontal Scaling
+      Stateless app servers
+      Auto-scale
+    
+  ✅ Redis Cluster
+      Sharded Redis
+      Avoid single instance bottleneck
+      
+  ✅ DB Sharding
+      Shard by:
+      shortCode hash
+      user ID
+  
+  ✅ CDN for Hot URLs
+      For extremely popular links:
+      Cache at CDN layer (CloudFront)
+      Edge redirection
+  
+  🔥 6️⃣ Avoiding Hot URL Problem
+      If one URL becomes viral:
+      Solution:
+      Cache at CDN
+      Multiple Redis replicas
+      Consistent hashing
+      Replication factor > 1
+  
+  🔥 7️⃣ High Availability Strategy
+      Multi-AZ deployment
+      Redis replication
+      DB replication (Primary + Read replicas)
+      Health checks on Load Balancer
+  
+  ⚖ 8️⃣ SQL vs NoSQL Decision
+  SQL Pros:
+    Strong consistency
+    Easy uniqueness constraint
+  
+  NoSQL Pros:
+    Better horizontal scaling
+    High write throughput
+  For FAANG answer:=====================================TIP===================================
+  👉 Start with SQL
+  👉 Move to NoSQL when scale increases
+  
+  🧠 9️⃣ Monolith vs Microservices
+  Start:
+  Single service (simpler)
+  Scale:
+  Split into:
+  URL service
+  Analytics service
+  ID generation service
+  Microservices only when scale demands.
+  
+  🧩 🔥 Final Production-Level Architecture Summary
+      Client
+         ↓
+      DNS
+         ↓
+      Load Balancer
+         ↓
+      Stateless App Servers
+         ↓
+      Redis (cache)
+         ↓
+      Primary DB (sharded)
+         ↓
+      Kafka → Analytics Workers
+      With:
+      
+      Snowflake ID service
+      CDN for hot URLs
+      Multi-region deployment
+  
+  🎯 How You Should Say This in Interview
+  “I’ll design the system with stateless application servers behind a load balancer.
+  Redirect requests will first hit Redis to maintain sub-50ms latency.
+  Persistent storage will be in a sharded database.
+  ID generation will be handled via a distributed Snowflake-style service to prevent collisions.
+  Analytics will be asynchronously processed using Kafka to avoid increasing redirect latency.
+  The system will scale horizontally and handle hot URLs using CDN caching.”
+  
+__________________________________________________________________________________________________________________________________
+Exact 45-minute mock answer script
+
+Design a URL Shortener (like Bitly)
+You can literally practice speaking this.
+
+🕐 Minute 0–5: Clarification Phase
+You say:
+“Before jumping into the solution, I’d like to clarify requirements.”
+
+Functional Requirements
+    User submits a long URL → system returns short URL.
+    Visiting short URL redirects to original URL.
+    Optional: custom alias.
+    Optional: expiration time.
+
+Basic analytics (click count).
+
+Non-Functional Requirements
+    “I assume the system should be highly available and low latency.
+    Redirect latency should ideally be under 50ms.
+    System should scale to millions of QPS.”
+
+Then ask:
+
+    What’s expected read vs write ratio?
+    Global or single region?
+    Consistency requirements?
+    Assume interviewer says:
+    100:1 read-heavy
+    Global users
+    Eventual consistency acceptable
+    You confirm:
+    “Great, I’ll optimize heavily for reads.”
+
+🕐 Minute 5–10: High-Level Design
+Architecture Overview
+
+https://substackcdn.com/image/fetch/%24s_%21QCw7%21%2Cf_auto%2Cq_auto%3Agood%2Cfl_progressive%3Asteep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F57794829-95e3-4e38-a615-34527d6cecdd_2374x1370.png
+
+https://miro.medium.com/1%2AV4HcNREpfchzu96PCR5HjQ.png
+
+https://blog.ishosting.com/hs-fs/hubfs/blog/api-gateway-vs-load-balancer/combining-en.png?height=986&name=combining-en.png&width=1536
+You say:
+    “At a high level, the system will consist of:
+    DNS
+    Load Balancer
+    Stateless Application Servers
+    Redis Cache
+    Primary Database
+    ID Generation Service
+    Analytics pipeline”
+
+🔁 Redirect Flow (Critical Path)
+    “For redirect, user hits short URL → load balancer → app server → Redis lookup.
+    If found, return 302 redirect immediately.
+    If not found, fetch from DB, update cache, then redirect.”
+    
+    “Redis ensures sub-millisecond lookup and protects database.”
+    
+    🔗 URL Creation Flow
+    “For URL creation:
+    App server generates unique ID → converts to Base62 → stores mapping in DB → caches in Redis → returns short URL.”
+
+🕐 Minute 10–18: Capacity Estimation
+You say:
+Assume:
+    10M daily active users
+    100M new URLs per day
+    10B redirects per day
+
+QPS Calculation
+Redirect QPS:
+
+    10B / 86400 ≈ 115K QPS
+    Peak ≈ 3x = 350K QPS
+    Writes:
+    
+    100M / 86400 ≈ 1.1K QPS
+    “Clearly read-heavy (~300:1 ratio). So caching is critical.”
+    
+    Storage Estimation
+    Each record:
+    shortCode: 8 bytes
+    longURL: 100 bytes avg
+    metadata: 50 bytes
+    ~160 bytes per record
+    100M per day → 16GB/day
+    Per year → ~6TB
+                          
+    “So we must shard database early.”
+
+🕐 Minute 18–25: Database Design
+Option 1: SQL
+    Schema:
+    
+    CREATE TABLE urls (
+      short_code VARCHAR(8) PRIMARY KEY,
+      long_url TEXT NOT NULL,
+      created_at TIMESTAMP,
+      expiry_at TIMESTAMP,
+      user_id BIGINT,
+      click_count BIGINT DEFAULT 0
+    );
+    Pros:
+    Strong consistency
+    Easy uniqueness constraint
+                          
+    Cons:
+    Harder to scale horizontally
+                      
+Option 2: NoSQL (Cassandra / DynamoDB)
+    Pros:
+    Easy horizontal scaling
+    High write throughput
+    
+    Cons:
+    Eventual consistency
+    “Given high scale and read-heavy traffic, I’d prefer a distributed NoSQL DB.”
+
+🕐 Minute 25–30: ID Generation Strategy
+Critical question.
+
+    Option A: Hash of long URL
+    Problem:
+    Collisions
+    Hard to scale
+    
+    Option B: Auto Increment
+    Problem:
+    Single DB bottleneck
+    
+    Option C: Snowflake-style ID (Best)
+    “I’d use a distributed ID generator like Twitter Snowflake.”
+
+Structure:
+                          
+    Timestamp | Machine ID | Sequence
+    Then convert numeric ID → Base62
+    
+    This guarantees:
+    Unique
+    Scalable
+    No central bottleneck
+
+🕐 Minute 30–35: Handling Edge Cases
+🔥 Hot URLs (Viral Links)
+Problem:
+One URL receives millions of hits.
+    
+    Solution:
+    Redis replication
+    CDN caching
+    Geo-replicated Redis
+    Load balancing
+    “We can cache redirect at CDN edge to reduce origin load.”
+
+🔥 Prevent Duplicate URLs
+Strategy:
+
+Maintain reverse index
+long_url → short_code
+Before generating new code, check if exists.
+
+🔥 Rate Limiting
+Use:
+Redis token bucket
+Per IP limit
+
+Protect against abuse.
+
+🕐 Minute 35–40: Consistency & Availability
+“Since redirects are read-heavy, eventual consistency is acceptable.”
+
+Writes:
+Write to primary DB
+
+Async replication
+
+Analytics:
+Don’t update click count inline.
+Send event to Kafka.
+Worker processes asynchronously.
+This avoids slowing down redirect.
+                      
+🕐 Minute 40–43: Scaling to 10M QPS
+To handle extreme scale:
+    Global CDN
+    Anycast DNS
+    Multi-region deployment
+    Redis cluster
+    DB sharding
+    Consistent hashing
+    
+    Shard by:
+    hash(shortCode) % N
+    Add shards as scale grows.
+
+🕐 Minute 43–45: Final Summary (Strong Closing)
+You say confidently:
+    “To summarize:
+    Stateless app servers behind load balancer.
+    Redis for sub-millisecond redirect.
+    Sharded distributed database for persistence.
+    Snowflake-based ID generation.
+    Async analytics pipeline using Kafka.
+    CDN caching for hot URLs.
+    Horizontal scalability and eventual consistency.
+    This architecture supports hundreds of thousands of QPS and can scale to millions with regional deployment.”
+
+Then stop talking.
+Let interviewer respond.
+
+
+===========================================LLD implementation script with code=========================
+
+
+
+We’ll build a production-style LLD (simplified but interview-ready).
+
+🎯 Step 1: Clarify Scope (What We’ll Implement)
+In LLD round, you say:
+
+“I’ll implement a simplified in-memory version demonstrating:
+URL creation
+Base62 encoding
+Duplicate prevention
+Expiration support
+Click tracking
+Thread-safe ID generation”
+                      
+We won’t implement:
+Redis
+Database
+Kafka
+CDN
+
+Because that’s infrastructure.
+
+🏗 Step 2: Class Design (LLD Structure)
+Core Components
+    URLShortenerService
+     ├── URLRepository
+     ├── IDGenerator
+     ├── Base62Encoder
+     └── URLMapping (Entity)
+    🧠 Design Responsibilities
+    Class	Responsibility
+    URLMapping	Data model
+    URLRepository	Storage layer
+    IDGenerator	Unique ID generation
+    Base62Encoder	ID → short code
+    URLShortenerService	Business logic
+    This shows clean separation of concerns.
+
+🧱 Step 3: Class Diagram (Text Form)
++----------------------+
+| URLMapping           |
++----------------------+
+| id                   |
+| long_url             |
+| short_code           |
+| created_at           |
+| expiry_at            |
+| click_count          |
++----------------------+
+
++----------------------+
+| IDGenerator          |
++----------------------+
+| get_next_id()        |
++----------------------+
+
++----------------------+
+| Base62Encoder        |
++----------------------+
+| encode(number)       |
+| decode(code)         |
++----------------------+
+
++----------------------+
+| URLRepository        |
++----------------------+
+| save(mapping)        |
+| find_by_short_code() |
+| find_by_long_url()   |
++----------------------+
+
++----------------------+
+| URLShortenerService  |
++----------------------+
+| create_short_url()   |
+| redirect()           |
++----------------------+
+🚀 Step 4: Full Python Implementation
+Now the working LLD code 👇
+
+import threading
+import time
+from datetime import datetime, timedelta
+
+
+# -----------------------------
+# Entity
+# -----------------------------
+class URLMapping:
+    def __init__(self, id, long_url, short_code, expiry_minutes=None):
+        self.id = id
+        self.long_url = long_url
+        self.short_code = short_code
+        self.created_at = datetime.utcnow()
+        self.expiry_at = (
+            self.created_at + timedelta(minutes=expiry_minutes)
+            if expiry_minutes else None
+        )
+        self.click_count = 0
+
+    def is_expired(self):
+        if self.expiry_at is None:
+            return False
+        return datetime.utcnow() > self.expiry_at
+
+    def increment_click(self):
+        self.click_count += 1
+
+
+# -----------------------------
+# ID Generator (Thread Safe)
+# -----------------------------
+class IDGenerator:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.counter = 1
+
+    def get_next_id(self):
+        with self.lock:
+            current_id = self.counter
+            self.counter += 1
+        return current_id
+
+
+# -----------------------------
+# Base62 Encoder
+# -----------------------------
+class Base62Encoder:
+    CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    BASE = len(CHARSET)
+
+    @classmethod
+    def encode(cls, number):
+        if number == 0:
+            return cls.CHARSET[0]
+
+        result = []
+        while number > 0:
+            number, remainder = divmod(number, cls.BASE)
+            result.append(cls.CHARSET[remainder])
+        return ''.join(reversed(result))
+
+
+# -----------------------------
+# Repository Layer (In-Memory)
+# -----------------------------
+class URLRepository:
+    def __init__(self):
+        self.short_to_mapping = {}
+        self.long_to_short = {}
+
+    def save(self, mapping):
+        self.short_to_mapping[mapping.short_code] = mapping
+        self.long_to_short[mapping.long_url] = mapping.short_code
+
+    def find_by_short_code(self, short_code):
+        return self.short_to_mapping.get(short_code)
+
+    def find_by_long_url(self, long_url):
+        short_code = self.long_to_short.get(long_url)
+        if short_code:
+            return self.short_to_mapping.get(short_code)
+        return None
+
+
+# -----------------------------
+# Service Layer
+# -----------------------------
+class URLShortenerService:
+    def __init__(self):
+        self.id_generator = IDGenerator()
+        self.repository = URLRepository()
+
+    def create_short_url(self, long_url, expiry_minutes=None):
+        # Check duplicate
+        existing = self.repository.find_by_long_url(long_url)
+        if existing:
+            return existing.short_code
+
+        # Generate unique ID
+        unique_id = self.id_generator.get_next_id()
+
+        # Convert to Base62
+        short_code = Base62Encoder.encode(unique_id)
+
+        # Create mapping
+        mapping = URLMapping(unique_id, long_url, short_code, expiry_minutes)
+
+        # Save
+        self.repository.save(mapping)
+
+        return short_code
+
+    def redirect(self, short_code):
+        mapping = self.repository.find_by_short_code(short_code)
+
+        if not mapping:
+            raise ValueError("Short URL does not exist")
+
+        if mapping.is_expired():
+            raise ValueError("Short URL has expired")
+
+        mapping.increment_click()
+        return mapping.long_url
+🧪 Step 5: Example Usage
+if __name__ == "__main__":
+    service = URLShortenerService()
+
+    short = service.create_short_url("https://www.google.com", expiry_minutes=5)
+    print("Short URL:", short)
+
+    original = service.redirect(short)
+    print("Redirected to:", original)
+🎤 How You Explain This in Interview
+You say:
+
+“I separated responsibilities into entity, repository, ID generation, and service layer.
+ID generation is thread-safe using locking.
+Base62 ensures compact URL.
+Repository maintains both forward and reverse mapping to prevent duplicates.
+Redirect checks expiration and increments click count.”
+
+That sounds senior-level.
+
+
+
+==================================Q/A=======================
+🔥 1️⃣ Why Not Just Use Memory?
+If we only use in-memory storage (like a Python dict or single Redis):
+
+❌ Problem 1: Data Loss
+Server crashes → all URLs lost
+Restart → mappings gone
+Not acceptable for production
+
+❌ Problem 2: No Long-Term Storage
+URL shortener data must live for years
+Memory is volatile
+
+❌ Problem 3: Scaling Limits
+One machine memory is limited
+Cannot store billions of URLs
+👉 Therefore, we need durable storage.
+
+🔥 2️⃣ Why Database Is Required
+A database gives:
+✅ 1. Durability (Most Important)
+When user shortens a URL:
+short.ly/abc123 → https://google.com
+That mapping must:
+Survive crashes
+Survive redeployments
+Survive region failures
+
+Databases use:
+WAL (Write Ahead Logging)
+Replication
+Backups
+This guarantees persistence.
+
+✅ 2. Billions of Records Storage
+    Let’s estimate:
+    If system stores:
+    100M URLs/day
+    For 3 years
+    That’s ~100B records.
+    You cannot store that purely in memory.
+    
+    Databases provide:
+    Disk-based storage
+    Partitioning
+    Sharding
+
+✅ 3. Unique Constraint Enforcement
+We need:
+
+    Unique short_code
+    Optional unique long_url
+    Database can enforce:
+    
+    PRIMARY KEY (short_code)
+    UNIQUE (long_url)
+    This prevents collisions.
+
+✅ 4. Replication & High Availability
+    Databases provide:
+    Primary-replica setup
+    Multi-AZ replication
+    Failover support
+    Redis alone (without persistence) cannot guarantee this safely.
+
+✅ 5. Analytics Storage
+    We may store:
+    Click count
+    User info
+    Creation time
+    Expiry
+
+That requires structured storage.
+
+🔥 3️⃣ Then Why Use Redis At All?
+Great follow-up.
+
+Because:
+👉 Redirect traffic is read-heavy.
+
+      Example:
+      Writes: 1K QPS
+      Reads: 300K QPS
+      If every redirect hits DB:
+      DB becomes bottleneck
+      Latency increases
+      So we use:
+      
+      Redis = Fast cache
+      DB = Source of truth
+      Flow:
+      
+      Check Redis
+      If miss → fetch from DB
+      Update Redis
+      This gives:
+      Low latency
+      DB protection
+
+🔥 4️⃣ Interview-Level Answer (What You Should Say)
+If interviewer asks:
+
+“Why do you need a database at all?”
+
+You answer:
+“The database acts as the source of truth. It ensures durability, long-term storage, and uniqueness guarantees.
+Redis is used for performance optimization, but it cannot replace persistent storage because memory is volatile and limited.
+For a production URL shortener storing billions of URLs, a distributed database is required for reliability and scalability.”
+
+That sounds senior.
+
+🔥 5️⃣ SQL vs NoSQL Decision
+SQL (MySQL/Postgres)
+Use when:
+
+Moderate scale
+Strong consistency needed
+Simple sharding acceptable
+          
+NoSQL (Cassandra/DynamoDB)
+Use when:
+Massive scale
+High write throughput
+Horizontal scaling required
+          
+FAANG-level answer:
+
+“Start with SQL for simplicity.
+Move to distributed NoSQL when scale grows.”
+
+🔥 6️⃣ What Happens If You Remove DB?
+System would:
+    Lose all data on crash
+    Fail during memory overflow
+    Be impossible to scale globally
+    Have no reliable backup
+    Risk data corruption
+    Which is unacceptable for production.
+
+🎯 Final Clear Summary
+    Component	Purpose
+    Database	Durable source of truth
+    Redis	Fast read optimization
+    App Server	Business logic
+    Think of it as:
+
+    Database = Permanent Storage
+    Redis = Performance Booster
+    🚀 Advanced Thought (Senior-Level Insight)
+    At extreme scale:
+    
+    Redis stores hot URLs
+    DB stores full dataset
+    Cold URLs may even move to archival storage
+    That shows architectural maturity.
+    
+    
+=========================================================================================Q/a===============================
+
+Below are strong follow-up questions interviewers ask for URL Shortener — with FAANG-quality answers you can give confidently.
+
+🔥 1️⃣ How do you handle hot URLs (viral traffic)?
+Problem:
+One URL suddenly receives millions of requests per second.
+
+Strong Answer:
+    “Hot URLs can overload cache or a single DB shard.
+    To mitigate this:
+    Use CDN edge caching (CloudFront/Akamai)
+    Redis cluster with replication
+    Consistent hashing
+    Multiple cache replicas per key
+    Use request coalescing to avoid cache stampede”
+    Bonus point:
+    “We can also pre-warm cache for trending URLs.”
+
+🔥 2️⃣ What if Redis crashes?
+Strong Answer:
+    “Redis is just a cache, not source of truth.
+    If Redis crashes:
+    System falls back to DB
+    Cache is rebuilt gradually
+    We can enable Redis persistence (AOF)
+    Deploy Redis in primary-replica mode”
+
+Key line:
+“Database guarantees durability. Cache improves performance.”
+
+🔥 3️⃣ How do you prevent duplicate short URLs?
+Strong Answer:
+    Option 1:
+    “Use globally unique ID generator like Snowflake.”
+    
+    Option 2:
+    “Enforce UNIQUE constraint on short_code in DB.”
+    
+    Extra level:
+    “In distributed setup, ID service must be coordination-free to avoid bottleneck.”
+
+🔥 4️⃣ How do you prevent duplicate long URLs?
+If same user submits same long URL twice.
+
+Strong Answer:
+    “Maintain reverse mapping:
+    long_url → short_code
+    Check before creating new entry.
+    We can store hash(long_url) as indexed column to optimize lookup.”
+              
+    Scalable approach:
+    “Use SHA256(long_url) as unique index key.”
+
+🔥 5️⃣ How would you scale to 10M QPS?
+Strong Answer:
+    “We scale horizontally at every layer:
+    Stateless app servers behind load balancer
+    Redis cluster (sharded)
+    DB sharding using consistent hashing
+    Multi-region deployment
+    CDN caching
+    Anycast DNS”
+    Extra level:
+    “Redirect traffic can be served entirely from CDN for hot URLs.”
+
+🔥 6️⃣ How do you shard the database?
+Strong Answer:
+    “Shard by hash(short_code) % N
+    This ensures even distribution.”
+    Avoid:
+    Sharding by timestamp → causes hotspot
+    Sharding by sequential ID → uneven load
+    Advanced:
+    “Use consistent hashing to allow shard addition without massive rebalancing.”
+
+🔥 7️⃣ How do you design rate limiting?
+Strong Answer:
+    “Use Redis-based token bucket or sliding window algorithm.”
+    Implementation idea:
+    Key: user_id or IP
+    Increment counter with expiry
+    “This prevents spam and abuse.”
+
+🔥 8️⃣ What consistency model would you choose?
+Strong Answer:
+    “Eventual consistency is acceptable for redirect flow.
+    Strong consistency required only during short URL creation.”
+    Because:
+    Slight delay in analytics is acceptable
+    Redirect must not fail
+
+Bonus:
+“CAP tradeoff: we prefer Availability over strong Consistency.”
+
+🔥 9️⃣ How do you delete expired URLs?
+Strong Answer:
+    Option 1:
+    “Lazy deletion during redirect check.”
+    Option 2:
+    “Background cleanup job (cron).”
+    Option 3:
+    “Use TTL support if using Redis.”
+
+Best answer:
+“Combine background cleanup + lazy validation.”
+
+🔥 🔟 How do you track analytics without slowing redirect?
+Strong Answer:
+    “Never update click count synchronously.
+    Instead:
+    Redirect immediately
+    Push event to Kafka
+    Background worker updates DB”
+    This keeps latency low.
+
+🔥 1️⃣1️⃣ How do you secure the system?
+Strong points:
+    Validate URL format
+    Prevent malicious links
+    Rate limit
+    CAPTCHA for abuse
+    Blacklist domains
+    HTTPS enforced
+    Signed URLs (if needed)
+
+🔥 1️⃣2️⃣ How do you handle custom aliases?
+Problem:
+    User wants: short.ly/myname
+    Strong Answer:
+    “Store custom alias as short_code.
+    Validate uniqueness via DB constraint.
+    Fallback to generated code if collision.”
+
+🔥 1️⃣3️⃣ What happens if ID generator fails?
+Strong Answer:
+    “Deploy multiple ID generator instances.
+    Use machine ID bits in Snowflake.
+    Avoid single central counter.”
+
+🔥 1️⃣4️⃣ What is the biggest bottleneck?
+Correct answer:
+    “Database write throughput and hot shard risk.”
+    Mitigation:
+    Sharding
+    Partitioning
+    Caching
+    Async writes
+
+🔥 1️⃣5️⃣ How would Bitly be different from TinyURL?
+Strong answer:
+    “Bitly supports:
+    Analytics dashboard
+    User accounts
+    Custom branding
+    Enterprise tracking
+    TinyURL is simpler — mostly redirect service.”
+    Shows product thinking.
+
+🔥 1️⃣6️⃣ How would you support global users?
+Strong answer:
+    “Deploy multi-region:
+    Geo DNS routing
+    Regional Redis
+    Regional DB replicas
+    Data replication across regions”
+
+🔥 1️⃣7️⃣ What if a DB shard becomes full?
+Strong answer:
+    
+    “Use consistent hashing.
+    Add new shard.
+    Rebalance gradually.”
+
+🔥 1️⃣8️⃣ How do you test scalability?
+    Strong answer:
+    “Load testing using:
+    JMeter
+    k6
+    Chaos engineering for resilience”
+
+🔥 1️⃣9️⃣ How do you design monitoring?
+    Metrics to track:
+    QPS
+    Cache hit rate
+    DB latency
+    Error rate
+    99th percentile latency
+
+🔥 2️⃣0️⃣ How would you migrate from monolith to microservices?
+Strong answer:
+
+    “Start monolith for simplicity.
+    Split into:
+    URL service
+    Analytics service
+    ID service
+    Use event-driven architecture.”
+    
+
+
+
+
+
+You said:
+30 rapid-fire system design questions and Mistakes candidates make in URL shortener interview
+
+
+🔹 Architecture & Scaling
+1️⃣ Why use a load balancer?
+Distributes traffic, ensures high availability, prevents single server overload.
+
+2️⃣ Why make app servers stateless?
+Enables horizontal scaling and easy auto-scaling.
+
+3️⃣ Where is the bottleneck?
+Database writes and hot shards.
+
+4️⃣ Why use Redis?
+Reduce DB load, achieve sub-10ms redirect latency.
+
+5️⃣ What happens on cache miss?
+Fetch from DB → update cache → return response.
+
+6️⃣ What if Redis memory fills?
+Evict least recently used keys (LRU) or scale cluster.
+
+7️⃣ How do you shard DB?
+Hash(short_code) % N or consistent hashing.
+
+8️⃣ How do you avoid hot shard?
+Avoid sequential ID sharding. Use hash-based distribution.
+
+9️⃣ How to handle 10M QPS?
+CDN caching + Redis cluster + sharded DB + multi-region deployment.
+
+🔹 ID Generation
+🔟 Why not use random short codes?
+Collision probability and expensive uniqueness checks.
+
+1️⃣1️⃣ Why Snowflake ID?
+Distributed, unique, coordination-free, scalable.
+
+1️⃣2️⃣ What if two servers generate same ID?
+Machine ID + sequence bits prevent collision.
+
+🔹 Data & Consistency
+1️⃣3️⃣ Strong or eventual consistency?
+Eventual for redirect; strong for creation uniqueness.
+
+1️⃣4️⃣ Why DB is source of truth?
+Ensures durability and reliability.
+
+1️⃣5️⃣ How do you backup?
+DB replication + periodic snapshots.
+
+🔹 Security & Abuse
+1️⃣6️⃣ How prevent spam?
+Rate limiting + CAPTCHA + IP throttling.
+
+1️⃣7️⃣ How block malicious links?
+Blacklist domains + URL validation + scanning service.
+
+1️⃣8️⃣ How prevent brute-force guessing?
+Use sufficiently long Base62 codes (6–8 chars).
+
+🔹 Performance
+1️⃣9️⃣ Why 302 redirect?
+Temporary redirect; allows tracking and analytics.
+
+2️⃣0️⃣ Why not 301?
+301 caches permanently in browser; reduces tracking flexibility.
+
+🔹 Advanced Design
+2️⃣1️⃣ How support custom alias?
+Store alias as short_code with uniqueness check.
+
+2️⃣2️⃣ How implement expiration?
+Store expiry_at field + background cleanup job.
+
+2️⃣3️⃣ How track analytics without latency increase?
+Publish click event to Kafka; process asynchronously.
+
+2️⃣4️⃣ What is cache stampede?
+Multiple requests hitting DB on cache miss simultaneously.
+
+Solution:
+Request coalescing or distributed locking.
+
+2️⃣5️⃣ How avoid single region failure?
+Multi-region deployment + DNS routing.
+
+🔹 Storage
+2️⃣6️⃣ SQL or NoSQL?
+SQL for simplicity; NoSQL for extreme scale.
+
+2️⃣7️⃣ Why index short_code?
+O(1) lookup for redirect.
+
+2️⃣8️⃣ What data grows fastest?
+URL mappings + click analytics.
+
+🔹 Monitoring
+2️⃣9️⃣ What metrics track?
+QPS, cache hit rate, DB latency, error rate, P99 latency.
+
+3️⃣0️⃣ How know when to shard?
+When DB CPU, storage, or latency exceeds threshold.
+
+🚨 PART 2: Mistakes Candidates Make in URL Shortener Interview
+These are CRITICAL.
+
+❌ 1️⃣ Jumping to Code Immediately
+    System design ≠ coding round.
+    Strong candidates:
+    Clarify requirements first.
+
+❌ 2️⃣ No Capacity Estimation
+    If you skip QPS math:
+    You look junior.
+    Always estimate:
+    Reads
+    Writes
+    Storage growth
+
+❌ 3️⃣ Ignoring Caching
+    If you don’t mention Redis:
+    Major red flag.
+    Redirect is read-heavy → cache mandatory.
+
+❌ 4️⃣ No ID Strategy
+    If you say:
+    “We generate random string”
+    Without collision handling — rejection risk.
+
+❌ 5️⃣ Forgetting Hot URL Problem
+    Interviewers LOVE this.
+    If you ignore:
+    Viral traffic
+    Cache stampede
+    Hot shards
+    You look inexperienced.
+
+❌ 6️⃣ Overengineering Too Early
+Don’t say:
+    “We need 10 microservices”
+    “Let’s use 12 databases”
+    Start simple. Scale gradually.
+
+❌ 7️⃣ No Tradeoff Discussion
+Weak:
+  “We use NoSQL.”
+  Strong:
+  “SQL initially for consistency; move to NoSQL at scale.”
+
+❌ 8️⃣ Not Handling Failure Cases
+    They expect:
+    Redis failure
+    DB failure
+    Region failure
+
+❌ 9️⃣ Ignoring Security
+Spam and abuse MUST be addressed.
+
+❌ 🔟 No Clear Summary
+If you end without summarizing architecture,
+You appear scattered.
+
+
+
+===================================“What are the edge cases in this design?”===================================
+
+Below is a complete FAANG-level edge case checklist for URL Shortener.
+
+🔥 1️⃣ Functional Edge Cases
+🔹 1. Same URL submitted multiple times
+Problem:
+User shortens the same long URL repeatedly.
+
+Solution:
+Maintain reverse mapping (long_url → short_code)
+Return existing short code
+
+🔹 2. Custom alias collision
+User wants:
+short.ly/google
+But it already exists.
+Solution:
+DB UNIQUE constraint on short_code
+Return error: “Alias already taken”
+
+🔹 3. Expired URL accessed
+If URL expired:
+Return 410 Gone
+Or show custom expiration page
+
+🔹 4. Invalid URL input
+Examples:
+Missing protocol
+Malformed string
+Very long URL (10,000+ chars)
+
+Solution:
+Validate format
+Set max length limit (e.g., 2048 chars)
+
+🔹 5. Extremely long short code request
+If someone tries:
+short.ly/aaaaaaaaaaaaaaaaaaaaaaaa
+Solution:
+Enforce fixed-length code validation
+Reject invalid patterns early
+
+🔥 2️⃣ Performance Edge Cases
+🔹 6. Hot URL (Viral Traffic)
+One link gets millions of hits per second.
+
+Risks:
+Redis overload
+Single DB shard overload
+Mitigation:
+CDN caching
+Redis replication
+Consistent hashing
+Request coalescing
+
+🔹 7. Cache Stampede
+Cache entry expires → thousands of requests hit DB simultaneously.
+
+Solution:
+Distributed lock
+Request coalescing
+Slight TTL randomization (jitter)
+
+🔹 8. Cache Memory Full
+Redis runs out of memory.
+
+Solution:
+LRU eviction
+Scale Redis cluster
+Monitor memory thresholds
+
+🔥 3️⃣ Distributed System Edge Cases
+🔹 9. ID collision
+If using random generation:
+Collision risk increases
+Solution:
+Snowflake-style ID
+DB uniqueness constraint
+
+🔹 🔟 Clock skew in distributed ID generation
+If using timestamp-based ID:
+Servers with wrong clock may create duplicate IDs
+Solution:
+NTP sync
+Logical clock fallback
+Use sequence bits carefully
+
+🔹 1️⃣1️⃣ DB shard becomes hot
+If sharding by sequential ID:
+One shard receives most traffic
+Solution:
+Hash-based sharding
+Consistent hashing
+
+🔹 1️⃣2️⃣ Redis crash
+Cache unavailable.
+System behavior:
+Fallback to DB
+Gradual cache rebuild
+
+🔹 1️⃣3️⃣ DB failure
+Primary DB crashes.
+Solution:
+Primary-replica setup
+Automatic failover
+
+🔹 1️⃣4️⃣ Region failure
+Entire data center goes down.
+
+Solution:
+Multi-region deployment
+Geo DNS routing
+Cross-region replication
+
+🔥 4️⃣ Security & Abuse Edge Cases
+🔹 1️⃣5️⃣ Brute-force short code guessing
+Attackers try:
+
+short.ly/aaaaaa
+short.ly/aaaaba
+Solution:
+Rate limiting
+Use longer short codes (6–8 chars)
+Monitor suspicious patterns
+
+🔹 1️⃣6️⃣ Spam URL generation
+Bot creates millions of short URLs.
+
+Solution:
+Rate limiting per IP/user
+CAPTCHA
+API key authentication
+
+🔹 1️⃣7️⃣ Malicious redirect links
+Phishing links.
+
+Solution:
+Blacklist known domains
+URL scanning service
+Abuse reporting system
+
+🔹 1️⃣8️⃣ Open redirect vulnerability
+Ensure system only redirects stored URLs.
+Never accept arbitrary redirect parameters.
+
+🔥 5️⃣ Data Growth Edge Cases
+🔹 1️⃣9️⃣ Database storage explosion
+If storing 100M URLs/day:
+
+DB grows rapidly
+Solution:
+Sharding
+Archival storage
+Delete expired URLs
+
+🔹 2️⃣0️⃣ Click count overflow
+If click count exceeds integer limit.
+
+Solution:
+Use BIGINT
+Async aggregation
+
+🔥 6️⃣ Business Logic Edge Cases
+🔹 2️⃣1️⃣ URL updated after creation
+    If original URL changes:
+    Should we allow editing?
+    If yes:
+    Update DB
+    Invalidate cache
+
+🔹 2️⃣2️⃣ Same URL, different users
+    Should each user get unique short code?
+    Design choice:
+    Global dedup OR user-specific mapping
+    Clarify requirement in interview.
+
+🔹 2️⃣3️⃣ Private URLs
+    If user wants:
+    Only accessible to logged-in users
+    Requires:
+    Auth layer
+    Access control
+
+🔥 7️⃣ Observability Edge Cases
+🔹 2️⃣4️⃣ Silent performance degradation
+    If cache hit rate drops:
+    DB overload risk
+    Monitor:
+    Cache hit %
+    P99 latency
+
+🔹 2️⃣5️⃣ Traffic spikes (Black Friday)
+    Auto-scale:
+    App servers
+    Redis cluster
+    DB replicas
+
+🎯 How To Answer in Interview
+If interviewer asks:
+
+    “What edge cases do you see?”
+    You respond structured:
+    “I’ll divide edge cases into:
+    Functional
+    Performance
+    Distributed system failures
+    Security
+    Data growth”
+    Then list 6–8 strong ones.
+    That sounds senior.
+
+🚀 What Impresses Interviewers Most
+    Mentioning:
+    Hot URL handling
+    Cache stampede
+    ID collision
+    Shard imbalance
+    Multi-region failover
+    Rate limiting
+    Abuse prevention
+    These show real production thinking.
+
+
+
+
+
