@@ -1,0 +1,377 @@
+Mock Interview Answer: Design Jira (10–15 minutes)
+1. Clarify Requirements (1–2 minutes)
+Before jumping into the design, I would like to clarify the requirements.
+
+Functional Requirements
+I assume the system should support:
+  1-Users can create projects
+  2-Users can create issues (task, bug, story)
+  3-Assign issues to team members
+  4-Update issue status
+  5-Add comments and attachments
+  6-Search and filter issues
+  7-Notifications for updates
+  8-Issue workflows (To Do → In Progress → Done)
+
+Optional features if time allows:
+Scrum / Kanban boards
+Sprint management
+Reports
+
+Non-Functional Requirements
+  1-The system should support:
+  2-High availability (99.9%)
+  3-Low latency (<200ms API)
+  4-Scalability for millions of issues
+  5-Strong consistency for issue updates
+  6-Secure access control
+
+2. Estimate Scale (1 minute)
+Let's assume:
+  Users = 10 million
+  Daily active users = 1 million
+  Issues created per user daily:
+    5 issues/day
+  Total issues created per day:
+    1M × 5 = 5M issues/day
+  Average issue size:
+    2KB metadata
+  Storage per year:
+    5M × 365 × 2KB ≈ 3.6TB/year
+  So the system needs to handle large data storage and heavy reads.
+
+3. High Level Architecture (2 minutes)
+The system will follow a microservice architecture.
+Architecture components:
+    
+    Client (Web/Mobile)
+            |
+        Load Balancer
+            |
+         API Gateway
+            |
+    --------------------------------
+    Auth Service
+    Project Service
+    Issue Service
+    Workflow Service
+    Search Service
+    Notification Service
+    --------------------------------
+            |
+         Databases
+            |
+ Cache / Queue / Search Engine
+4. Core Services
+  1. Auth Service
+      Handles:
+      Login
+      Authentication
+      Authorization
+      Supports role-based access control.
+  
+  2. Project Service
+      Handles:
+      Create project
+      Add members
+      Manage project settings
+  
+  3. Issue Service
+      This is the core service.
+      Responsibilities:
+      Create issue
+      Update issue
+      Assign issue
+      Add comments
+      Change status
+  
+  4. Workflow Service
+  Controls issue transitions.
+  Example workflow:
+  
+      Backlog
+         ↓
+      To Do
+         ↓
+      In Progress
+         ↓
+      Code Review
+         ↓
+      Done
+      
+      Admin users can configure workflows.
+  
+  5. Search Service
+    Searching issues by:
+    status
+    assignee
+    project
+    priority
+    label
+  We can use Elasticsearch for fast filtering.
+6. Notification Service
+  Triggers alerts when:
+  issue assigned
+  comment added
+  status changed
+  Uses event queue for asynchronous notifications.
+
+5. Database Design (2 minutes)
+  A relational database like PostgreSQL is suitable because:
+  strong relationships
+  transactions
+  structured data
+  Users Table
+    User
+    -----
+    user_id
+    name
+    email
+    password
+    role
+    created_at
+Projects Table
+    Project
+    --------
+    project_id
+    name
+    description
+    owner_id
+    created_at
+Issues Table
+    Issue
+    ------
+    issue_id
+    project_id
+    title
+    description
+    status
+    priority
+    assignee_id
+    reporter_id
+    created_at
+    updated_at
+Comments Table
+    Comment
+    -------
+    comment_id
+    issue_id
+    user_id
+    comment_text
+    created_at
+Attachments Table
+    Attachment
+    ----------
+    attachment_id
+    issue_id
+    file_url
+    uploaded_by
+
+Actual files stored in object storage.
+
+6. APIs (1 minute)
+  Create Issue
+  POST /projects/{projectId}/issues
+
+  Request:
+  
+  {
+   title: "Login Bug",
+   description: "User unable to login"
+  }
+  Update Issue Status
+  PATCH /issues/{id}/status
+  Add Comment
+  POST /issues/{id}/comments
+  Search Issues
+  GET /issues?status=OPEN&assignee=123
+
+7. Caching (1 minute)
+  Since issues are frequently read, we add Redis caching.
+  Cache:
+  project metadata
+  issue lists
+  user sessions
+  
+  Flow:
+  
+  Client
+    |
+  API
+    |
+  Redis Cache
+    |
+  Database
+8. Handling Attachments
+  Attachments may be large.
+  Instead of storing them in DB:
+  Store in:
+  Object storage (S3)
+  
+  Database stores only:
+  file_url
+  issue_id
+
+9. Event Driven Notifications (1 minute)
+    When an issue is created:
+    
+    Issue Service
+          |
+       Kafka Queue
+          |
+    Notification Service
+          |
+    Email / Slack / Push
+    
+    This ensures notifications do not slow down API responses.
+
+10. Handling Concurrency
+  Multiple users may update the same issue.
+  Solution:
+  Optimistic locking
+  Add version column.
+  
+  Example:
+  UPDATE issues
+  SET status='DONE', version=version+1
+  WHERE id=1 AND version=3
+
+If version mismatch occurs → retry.
+
+11. Scaling the System (2 minutes)
+  Horizontal Scaling
+  Load Balancer
+     |
+  Multiple API Servers
+  Database Scaling
+  
+  Use:
+  Read Replicas
+  Primary DB (Writes)
+        |
+  Read Replica (Reads)
+  Sharding
+  Shard by:
+  ProjectID
+  All issues of the same project go to the same shard.
+  Search Scaling
+    Use:
+    Elasticsearch cluster
+
+12. Potential Bottlenecks
+  Heavy Search Queries
+    Solution:
+    Elasticsearch
+  
+  Large Attachments
+    Solution:
+    Object storage
+    CDN
+  
+  Notification Load
+    Solution:
+    Kafka queue
+
+13. Final Architecture Summary
+  Clients
+     |
+  Load Balancer
+     |
+  API Gateway
+     |
+  --------------------------------
+  Auth Service
+  Project Service
+  Issue Service
+  Workflow Service
+  Search Service
+  Notification Service
+  --------------------------------
+     |
+  PostgreSQL Database
+     |
+  Redis Cache
+  Kafka Queue
+  Elasticsearch
+  Object Storage
+
+Final Interview Wrap-Up (Important)
+
+A good closing statement:
+
+To summarize, I designed a scalable Jira-like system with microservices for issue management, workflows, and notifications. The system uses PostgreSQL for structured data, Redis for caching, Elasticsearch for search, Kafka for asynchronous events, and object storage for attachments. This architecture ensures scalability, reliability, and efficient collaboration for large teams.\
+
+------------------------------------Q/A----------------------------
+
+How Atlassian Actually Scales Jira
+
+  Atlassian uses several techniques.
+  Microservices
+  
+  Jira Cloud is broken into services:
+  Issue Service
+  Identity Service
+  Search Service
+  Notification Service
+
+Search
+  Uses Elasticsearch clusters.
+
+Storage
+  Uses:
+  PostgreSQL
+  distributed storage for attachments
+
+Event Streaming
+  Uses Kafka for event pipelines.
+
+Multi-Tenancy
+  Jira Cloud hosts multiple organizations with tenant isolation.
+
+2-FAANG-Level Architecture Diagram
+    Clients
+       |
+    Load Balancer
+       |
+    API Gateway
+       |
+    --------------------------------
+    Auth Service
+    Project Service
+    Issue Service
+    Workflow Service
+    Search Service
+    Notification Service
+    --------------------------------
+       |
+    PostgreSQL Cluster
+    Redis Cache
+    Kafka Queue
+    Elasticsearch
+    Object Storage
+
+The system is designed using a microservice architecture with PostgreSQL for structured data, Redis for caching, Elasticsearch for fast search, Kafka for asynchronous communication, and object storage for attachments. The architecture supports horizontal scaling, high availability, and efficient collaboration for millions of users.
+
+LLD classes:
+class Issue {
+   String id;
+   String title;
+   String description;
+   Status status;
+   Priority priority;
+   User assignee;
+   User reporter;
+}
+
+
+class Project {
+   String id;
+   String name;
+   List<User> members;
+}
+
+class Comment {
+   String text;
+   User author;
+   Date createdAt;
+}
