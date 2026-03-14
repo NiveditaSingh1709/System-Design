@@ -1,0 +1,570 @@
+1. Clarify Requirements
+
+Before designing, ask clarifying questions.
+
+Functional Requirements
+The system should:
+Send notifications to users
+
+Support multiple channels:
+
+  Email
+  SMS
+  Push notifications
+  In-app notifications
+  Trigger notifications based on events
+  Support bulk notifications
+  Allow users to manage preferences
+
+Example events:
+  Task assigned
+  Password reset
+  New message
+
+Non-Functional Requirements
+  High scalability
+  Low latency
+  High availability
+  Fault tolerance
+  Guaranteed delivery (at least once)
+
+2. Estimate Scale
+
+  Example assumptions:
+  Users = 100M
+  Daily active users = 10M
+  Notifications per user per day:
+  10 notifications
+  Total per day:
+  10M × 10 = 100M notifications/day
+  Peak traffic:
+  ~3000 notifications/sec
+
+So the system must support thousands of requests per second.
+
+3. High-Level Architecture
+
+    Core architecture:
+    
+    Client Applications
+            |
+    Application Servers
+            |
+    Notification Service
+            |
+    Message Queue
+            |
+    ----------------------------------
+    Email Worker
+    SMS Worker
+    Push Worker
+    In-App Worker
+    ----------------------------------
+            |
+    External Providers / Databases
+
+4. Key Components
+1. Notification Service
+
+This service:
+
+receives notification requests
+
+validates payload
+
+stores notification
+
+pushes event to queue
+
+Example API:
+
+POST /notifications
+
+Payload example:
+
+{
+ "userId": "123",
+ "channel": "EMAIL",
+ "message": "Task assigned to you"
+}
+2. Message Queue
+
+Queues decouple services.
+
+Benefits:
+
+async processing
+
+retry capability
+
+traffic smoothing
+
+Common technologies:
+
+Kafka
+
+RabbitMQ
+
+AWS SQS
+
+Flow:
+
+Notification Service
+        |
+      Queue
+        |
+   Worker Services
+3. Worker Services
+
+Separate workers for each channel.
+
+Email Worker
+
+Sends emails via providers.
+
+SMS Worker
+
+Sends messages via telecom APIs.
+
+Push Worker
+
+Sends mobile push notifications.
+
+In-App Worker
+
+Stores notifications in the database.
+
+5. Database Design
+
+Two main tables.
+
+Notifications Table
+notifications
+--------------
+notification_id
+user_id
+type
+channel
+message
+status
+created_at
+User Preferences
+user_preferences
+----------------
+user_id
+email_enabled
+sms_enabled
+push_enabled
+
+This allows users to control notification settings.
+
+6. Event Driven Flow
+Example: Task assigned
+
+    Task Service
+         |
+    Event Published
+         |
+    Notification Service
+         |
+    Message Queue
+         |
+    Workers
+         |
+    Send Notification
+7. Handling Failures
+
+    Workers may fail.
+    Solutions:
+    Retry Mechanism
+    If sending fails:
+    Retry 3 times
+    Dead Letter Queue
+    If retries fail:
+    Message → Dead Letter Queue
+    For debugging.
+
+8. Rate Limiting
+
+    To avoid spamming users.
+    Example rule:
+    Max 5 notifications per minute per user
+    Implemented using:
+      Redis counters
+
+9. Scheduling Notifications
+
+  Some notifications are delayed.
+  Example:
+  Reminder after 24 hours
+  Use:
+  Scheduled jobs
+  Delayed queues
+
+10. Scaling Strategy
+    Horizontal Scaling
+    Workers scale independently.
+    Queue
+     |
+    Multiple Workers
+    Database Scaling
+    
+    Use:
+    partitioning by user ID
+    read replicas
+    Caching
+    Redis caches:
+    user preferences
+    notification templates
+
+11. Notification Templates
+Store templates for reusable messages.
+
+  Example table:
+  templates
+  ---------
+  template_id
+  channel
+  template_text
+  
+  Example:
+  
+  Hello {{name}}, your task {{task}} is due today.
+12. Final Architecture Diagram
+    Clients
+       |
+    Application Services
+       |
+    Notification Service
+       |
+    Message Queue
+       |
+    --------------------------------
+    Email Worker
+    SMS Worker
+    Push Worker
+    In-App Worker
+    --------------------------------
+       |
+    Notification Database
+       |
+    External Providers
+13. Interview Closing Summary
+
+A strong closing statement:
+I designed a scalable notification system using an event-driven architecture. The system uses a message queue to decouple notification processing, worker services to send notifications through different channels, and databases to store notifications and user preferences. Horizontal scaling and retry mechanisms ensure reliability and high throughput.
+Order updates
+
+______________________________Q/A___________________________________________
+
+2. Visual Architecture Diagram (Memorize for Interviews)
+
+You can draw this quickly on a whiteboard.
+
+    Clients
+       |
+    Application Services
+       |
+    Notification API
+       |
+    Event Queue / Kafka
+       |
+    ---------------------------------
+    Email Worker
+    SMS Worker
+    Push Worker
+    In-App Worker
+    ---------------------------------
+       |
+    Notification Database
+    User Preferences DB
+       |
+    External Providers
+
+
+------------------------------Common Follow-Up Interview Questions----------------------------------
+
+1. How would you handle duplicate notifications?
+
+Solution:
+
+idempotency keys
+2. How do you guarantee delivery?
+
+Solutions:
+  retries
+  persistent queues
+  acknowledgments
+
+3. How do you prevent notification spam?
+
+Solutions:
+  rate limiting
+  user preferences
+  batching
+
+4. How would you schedule notifications?
+
+  Example:
+  Send reminder after 24 hours
+  Use:
+  delayed queues
+  cron jobs
+
+5. How do you support billions of notifications?
+
+  Solutions:
+  sharded queues
+  horizontal worker scaling
+  partitioned databases
+
+6. How do you store unread notifications?
+
+  Use:
+  in-app notifications table
+7. How do you prioritize important notifications?
+
+  Use:
+  ranking service
+8. How do you ensure low latency?
+
+  Solutions:
+  caching
+  edge servers
+  async processing
+
+11. Final Interview Summary
+
+A strong final answer:
+
+I designed a scalable notification system using an event-driven architecture with Kafka queues and channel-specific worker services. Notifications are processed asynchronously and delivered through email, SMS, push, or in-app channels. User preferences and retry mechanisms ensure reliability, while horizontal scaling allows the system to handle millions of notifications per second.
+
+1. How Notification Syncing Works Across Multiple Devices
+
+    Users often access apps from multiple devices:
+    Phone
+    Laptop
+    Tablet
+    
+    To keep notifications consistent, systems use server-based storage + device syncing.
+    
+    Basic Sync Architecture
+    User Action
+         |
+    Notification Service
+         |
+    Notification Database
+         |
+    Push Notification
+         |
+    Device receives alert
+         |
+    User opens app
+         |
+    App fetches notifications from server
+    
+    Key idea:
+    
+    👉 Server stores the notification history
+    👉 Devices fetch updates when needed
+    
+    Multi-Device Sync Flow
+    
+    Example: user gets a notification.
+    
+    Event Created
+         |
+    Notification Stored in DB
+         |
+    Push sent to all user devices
+         |
+    Devices receive notification
+    
+    Devices registered:
+    
+      UserID: 1001
+      Device1: iPhone
+      Device2: Laptop
+      Device3: Tablet
+    
+    When a notification is created:
+    
+      Send push → iPhone
+      Send push → Laptop
+      Send push → Tablet
+      Read Status Sync
+    
+    If the user reads the notification on one device:
+    
+    User opens notification on phone
+            |
+    Server updates status → READ
+            |
+    Other devices sync
+            |
+    Notification disappears or marked read
+    Techniques Used
+    
+    Large systems use:
+      Device tokens
+      WebSockets
+      Long polling
+      Push services
+    
+    Example push providers:
+    Apple Push Notification service
+    Firebase Cloud Messaging
+
+2. How Companies Store Billions of Notifications Efficiently
+
+Companies like Meta Platforms handle billions of notifications daily, so efficient storage is critical.
+
+    Database Schema Example
+    notifications
+    --------------
+    notification_id
+    user_id
+    type
+    message
+    status
+    created_at
+    Data Partitioning (Sharding)
+    
+    Instead of one huge database, data is split across many servers.
+    
+    Example:
+    
+    Shard 1 → users 1–1M
+    Shard 2 → users 1M–2M
+    Shard 3 → users 2M–3M
+    
+    This reduces database load.
+    
+    Time-Based Partitioning
+    
+    Notifications can be stored by date partitions.
+    Example:
+    
+    notifications_2026_jan
+    notifications_2026_feb
+    notifications_2026_mar
+    
+    Benefits:
+    faster queries
+    easier archiving
+    Archiving Old Notifications
+    Old data moves to cheaper storage.
+    
+    Example flow:
+    
+    Recent notifications → Fast database
+    Old notifications → Data warehouse / cold storage
+    Compression and Batching
+    
+    Instead of storing many small notifications:
+    
+    Example:
+    
+    User liked your post
+    User liked your post
+    User liked your post
+    
+    Systems aggregate them:
+    10 people liked your post
+    This reduces storage.
+
+3. How Message Queues Handle Large Notification Traffic
+
+Message queues allow systems to process millions of notifications asynchronously.
+
+    Common technologies:
+    Apache Kafka
+    RabbitMQ
+    AWS SQS
+    
+    Basic Queue Architecture
+    Application Service
+          |
+    Message Queue
+          |
+    Worker Services
+          |
+    Notification Sent
+    Why Queues Are Important
+    
+    Queues solve three major problems:
+
+1. Traffic Spikes
+
+    Example spike:
+    Black Friday sale
+    Millions of notifications triggered.
+    Queue buffers traffic:
+    
+  Requests → Queue → Workers process gradually
+2. Asynchronous Processing
+
+    Without queue:
+    App waits until notification sent
+    With queue:
+    App pushes message to queue
+    App continues immediately
+    This improves performance.
+
+3. Parallel Processing
+
+    Workers can scale horizontally.
+    
+    Queue
+     |
+    Worker1
+    Worker2
+    Worker3
+    Worker4
+
+    Each worker processes notifications independently.
+    Queue Partitioning
+    Large systems partition queues.
+    Example:
+    
+    Partition1 → userID % 4 = 0
+    Partition2 → userID % 4 = 1
+    Partition3 → userID % 4 = 2
+    Partition4 → userID % 4 = 3
+
+    This distributes load.
+    Retry and Failure Handling
+    If sending fails:
+    Retry → Retry Queue → Dead Letter Queue
+    Dead letter queue stores failed messages for investigation.
+    End-to-End Notification Pipeline
+
+    A typical large-scale notification flow:
+    
+    User Action
+         |
+    Application Service
+         |
+    Event Queue (Kafka)
+         |
+    Notification Service
+         |
+    Channel Workers
+         |
+    Push / Email / SMS Providers
+         |
+    User Devices
+
+    Key Takeaways
+    
+    Multi-device syncing
+    server stores notification history
+    devices fetch updates
+    Efficient storage
+    sharding
+    time partitioning
+    aggregation
+    High-scale processing
+    message queues
+    worker pools
+    retries
