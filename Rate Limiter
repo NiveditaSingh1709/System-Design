@@ -1,1 +1,299 @@
+                +-------------------+
+                |   RateLimiter     |
+                +-------------------+
+                         |
+                         |
+                +-------------------+
+                | RateLimitStrategy |
+                +-------------------+
+                   /            \
+                  /              \
+     +------------------+   +------------------+
+     |  TokenBucket     |   | SlidingWindow    |
+     +------------------+   +------------------+
+
+                |
+                |
+         +---------------+
+         | StorageLayer  |
+         +---------------+
+           /          \
+          /            \
+ +----------------+  +---------------+
+ | InMemoryStore  |  | RedisStore    |
+ +----------------+  +---------------+
+
+        |
+        |
+ +------------------+
+ | RateLimitConfig  |
+ +------------------+
+
+
+1. Problem Statement
+
+A Rate Limiter restricts the number of requests a user/client can make within a given time window.
+Example
+  Allow 100 requests per minute per user
+  If exceeded → return HTTP 429 Too Many Requests
+  Used in systems like:
+    Twitter API limits
+    Stripe payments API
+    GitHub public API
+
+2. Functional Requirements
+
+    Limit requests per user / IP / API key
+    Configurable rate limit
+    Low latency (microseconds)
+    Highly scalable
+    Distributed support
+
+3. High Level Design (HLD)
+    Client
+       |
+       v
+    API Gateway / Load Balancer
+       |
+       v
+    Rate Limiter Service
+       |
+       v
+    Cache Store (Redis)
+       |
+       v
+    Application Server
+
+Flow
+    Request arrives
+    Rate limiter checks user request count
+    If limit exceeded → reject
+    Else → forward request
+
+4. Algorithms Used in Rate Limiter
+
+Interviewers expect you to know these 4 algorithms.
+
+    Algorithm	Description	Pros	Cons
+    Fixed Window	Count requests in fixed time window	Simple	Burst problem
+    Sliding Window Log	Store timestamps	Accurate	Memory heavy
+    Sliding Window Counter	Weighted windows	Balanced	Medium complexity
+    Token Bucket	Tokens refill over time	Best for APIs	Slightly complex
+
+Most production systems use:
+
+✔ Token Bucket
+✔ Sliding Window
+
+5. Fixed Window Algorithm
+
+Example:
+    Limit: 5 requests per minute
+    
+    Window: 12:00–12:01
+    User Requests:
+    12:00:10
+    12:00:20
+    12:00:30
+    12:00:40
+    12:00:50
+    
+    Next request -> BLOCK
+
+Problem:
+
+  12:00:59 → 5 requests
+  12:01:01 → 5 requests
+  
+  10 requests in 2 seconds
+  
+  Burst issue.
+
+6. Sliding Window Algorithm
+
+Instead of fixed window, we check the last N seconds.
+Example:
+
+Limit = 5 requests
+Window = 60 seconds
+
+We store timestamps and remove old ones.
+
+7. HLD Components
+    1. RateLimiter
+    
+    Main class handling requests.
+    
+    2. Storage Layer
+    Can be:
+    Redis
+    In-memory
+    Distributed cache
+    
+    3. Configuration
+    
+    Defines limits per user/API.
+
+8. LLD Class Design
+    +--------------------+
+    | RateLimiter        |
+    +--------------------+
+    | limit              |
+    | window_size        |
+    | storage            |
+    +--------------------+
+    | allow_request()    |
+    +--------------------+
+    
+    +--------------------+
+    | Storage Interface  |
+    +--------------------+
+    | get_requests()     |
+    | add_request()      |
+    | remove_old()       |
+    +--------------------+
+    
+    +--------------------+
+    | InMemoryStorage    |
+    +--------------------+
+    | dict[user] -> list |
+    +--------------------+
+9. Python Implementation (Sliding Window)
+import time
+from collections import defaultdict, deque
+
+
+class RateLimiter:
+
+    def __init__(self, limit, window_size):
+        self.limit = limit
+        self.window_size = window_size
+        self.requests = defaultdict(deque)
+
+    def allow_request(self, user_id):
+
+        current_time = time.time()
+        user_queue = self.requests[user_id]
+
+        # remove expired timestamps
+        while user_queue and current_time - user_queue[0] > self.window_size:
+            user_queue.popleft()
+
+        if len(user_queue) < self.limit:
+            user_queue.append(current_time)
+            return True
+
+        return False
+10. Example Usage
+limiter = RateLimiter(limit=5, window_size=60)
+
+for i in range(7):
+    if limiter.allow_request("user1"):
+        print("Request allowed")
+    else:
+        print("Rate limit exceeded")
+
+Output
+
+Request allowed
+Request allowed
+Request allowed
+Request allowed
+Request allowed
+Rate limit exceeded
+Rate limit exceeded
+11. Token Bucket Implementation
+
+Better for production APIs.
+
+Concept:
+
+Bucket capacity = 10 tokens
+Refill rate = 1 token/sec
+Each request consumes 1 token
+
+Python:
+
+import time
+
+
+class TokenBucket:
+
+    def __init__(self, capacity, refill_rate):
+        self.capacity = capacity
+        self.tokens = capacity
+        self.refill_rate = refill_rate
+        self.last_refill = time.time()
+
+    def allow_request(self):
+
+        now = time.time()
+        elapsed = now - self.last_refill
+
+        self.tokens = min(
+            self.capacity,
+            self.tokens + elapsed * self.refill_rate
+        )
+
+        self.last_refill = now
+
+        if self.tokens >= 1:
+            self.tokens -= 1
+            return True
+
+        return False
+12. Distributed Rate Limiter
+
+In real systems we store counts in:
+Redis
+Memcached
+
+Example architecture:
+
+    User
+     |
+    API Gateway
+     |
+    Rate Limiter
+     |
+    Redis Cluster
+     |
+    Backend Services
+    
+    Reason:
+    shared state
+    atomic increments
+    fast
+
+13. Redis Implementation Idea
+
+    Using Redis atomic commands.
+    
+    INCR user123
+    EXPIRE user123 60
+
+    or Lua script.
+
+14. Scaling Considerations
+    1. Distributed nodes
+    Multiple rate limiter servers.
+    
+    2. Consistency
+    Use Redis atomic operations.
+    
+    3. Sharding
+    Shard by:
+    
+    user_id % N
+    4. Caching
+    Hot users in memory.
+
+15. Production Example
+
+    APIs like:
+    Google Cloud APIs
+    Amazon Web Services
+    Netflix microservices
+    
+    use distributed rate limiting.
 
