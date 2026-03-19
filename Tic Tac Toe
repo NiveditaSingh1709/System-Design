@@ -1,1 +1,398 @@
 
+time O(1)
+from enum import Enum
+from abc import ABC, abstractmethod
+
+
+class Symbol(Enum):
+    X = "X"
+    O = "O"
+
+
+class GameStatus(Enum):
+    IN_PROGRESS = 1
+    DRAW = 2
+    WIN = 3
+
+
+class Player:
+    def __init__(self, name: str, symbol: Symbol):
+        self.name = name
+        self.symbol = symbol
+
+
+class Board:
+    def __init__(self, size: int):
+        self.size = size
+        # Plain None grid — no Cell wrapper needed
+        self.grid: list[list[Symbol | None]] = [
+            [None] * size for _ in range(size)
+        ]
+
+    def place_move(self, row: int, col: int, symbol: Symbol) -> bool:
+        if not (0 <= row < self.size and 0 <= col < self.size):
+            print("Out of bounds!")
+            return False
+        if self.grid[row][col] is not None:
+            print("Cell already occupied!")
+            return False
+        self.grid[row][col] = symbol
+        return True
+
+    def print_board(self):
+        for row in self.grid:
+            print(" | ".join(s.value if s else "-" for s in row))
+        print()
+
+
+class WinningStrategy(ABC):
+    @abstractmethod
+    def check(self, board: Board, row: int, col: int, symbol: Symbol) -> bool:
+        pass
+
+
+class RowStrategy(WinningStrategy):
+    def check(self, board: Board, row: int, col: int, symbol: Symbol) -> bool:
+        # Only check the row that was just played — O(n) not O(n²)
+        return all(board.grid[row][c] == symbol for c in range(board.size))
+
+
+class ColStrategy(WinningStrategy):
+    def check(self, board: Board, row: int, col: int, symbol: Symbol) -> bool:
+        # Only check the column that was just played
+        return all(board.grid[r][col] == symbol for r in range(board.size))
+
+
+class DiagonalStrategy(WinningStrategy):
+    def check(self, board: Board, row: int, col: int, symbol: Symbol) -> bool:
+        n = board.size
+        # Main diagonal — only relevant if move is on it
+        if row == col and all(board.grid[i][i] == symbol for i in range(n)):
+            return True
+        # Anti-diagonal — only relevant if move is on it
+        if row + col == n - 1 and all(board.grid[i][n - i - 1] == symbol for i in range(n)):
+            return True
+        return False
+
+
+class Game:
+    def __init__(self, size: int):
+        self.board = Board(size)
+        self.players = [Player("P1", Symbol.X), Player("P2", Symbol.O)]
+        self.turn = 0
+        self.status = GameStatus.IN_PROGRESS
+        self.strategies: list[WinningStrategy] = [
+            RowStrategy(), ColStrategy(), DiagonalStrategy()
+        ]
+        self._moves_made = 0  # O(1) draw detection — no board scan needed
+
+    def make_move(self, row: int, col: int) -> bool:
+        player = self.players[self.turn]
+
+        if not self.board.place_move(row, col, player.symbol):
+            return False
+
+        self._moves_made += 1
+
+        # Pass coordinates directly — no Move object allocation
+        for strategy in self.strategies:
+            if strategy.check(self.board, row, col, player.symbol):
+                self.status = GameStatus.WIN
+                self.board.print_board()
+                print(f"{player.name} wins!")
+                return True
+
+        if self._moves_made == self.board.size ** 2:
+            self.status = GameStatus.DRAW
+            self.board.print_board()
+            print("Game draw!")
+            return True
+
+        self.turn = 1 - self.turn
+        return True
+
+
+if __name__ == "__main__":
+    game = Game(3)
+
+    while game.status == GameStatus.IN_PROGRESS:
+        game.board.print_board()
+        try:
+            row = int(input("Enter row (1-3): ")) - 1
+            col = int(input("Enter col (1-3): ")) - 1
+        except ValueError:
+            print("Invalid input! Enter numbers only.")
+            continue
+        game.make_move(row, col)
+
+---------------------------------------------------------------------------------------------------------------------------------------
+
+6. Time Complexity
+Operation	Complexity
+Make Move	O(1)
+Check Winner	O(N)
+Board Print	O(N²)
+
+TIME O(n2)
+
+from enum import Enum
+from abc import ABC, abstractmethod
+
+
+# ENUMS
+class Symbol(Enum):
+    X = "X"
+    O = "O"
+
+
+class GameStatus(Enum):
+    IN_PROGRESS = 1
+    DRAW = 2
+    WIN = 3
+
+
+# PLAYER
+class Player:
+    def __init__(self, name, symbol):
+        self.name = name
+        self.symbol = symbol
+
+
+# CELL
+class Cell:
+    def __init__(self):
+        self.symbol = None
+
+
+# BOARD
+class Board:
+    def __init__(self, size):
+        self.size = size
+        self.grid = [[Cell() for _ in range(size)] for _ in range(size)]
+
+    def place_move(self, row, col, symbol):
+        if row < 0 or row >= self.size or col < 0 or col >= self.size:
+            print("Out of bounds!")
+            return False
+
+        if self.grid[row][col].symbol is not None:
+            print("Cell already occupied!")
+            return False
+
+        self.grid[row][col].symbol = symbol
+        return True
+
+    # ✅ THIS METHOD MUST EXIST INSIDE CLASS
+    def print_board(self):
+        for row in self.grid:
+            print(" | ".join(cell.symbol.value if cell.symbol else "-" for cell in row))
+        print()
+    def is_full(self):
+        return all(cell.symbol is not None for row in self.grid for cell in row)
+    
+
+
+# MOVE
+class Move:
+    def __init__(self, player, row, col):
+        self.player = player
+        self.row = row
+        self.col = col
+
+
+# STRATEGY
+class WinningStrategy(ABC):
+    @abstractmethod
+    def check(self, board, move):
+        pass
+
+
+class RowStrategy(WinningStrategy):
+    def check(self, board, move):
+        return all(
+            board.grid[move.row][c].symbol == move.player.symbol
+            for c in range(board.size)
+        )
+
+
+class ColStrategy(WinningStrategy):
+    def check(self, board, move):
+        return all(
+            board.grid[r][move.col].symbol == move.player.symbol
+            for r in range(board.size)
+        )
+
+
+class DiagonalStrategy(WinningStrategy):
+    def check(self, board, move):
+        n = board.size
+        sym = move.player.symbol
+
+        if move.row == move.col:
+            if all(board.grid[i][i].symbol == sym for i in range(n)):
+                return True
+
+        if move.row + move.col == n - 1:
+            if all(board.grid[i][n - i - 1].symbol == sym for i in range(n)):
+                return True
+
+        return False
+
+
+# GAME
+class Game:
+    def __init__(self, size):
+        self.board = Board(size)
+        self.players = [Player("P1", Symbol.X), Player("P2", Symbol.O)]
+        self.turn = 0
+        self.status = GameStatus.IN_PROGRESS
+        self.strategies = [RowStrategy(), ColStrategy(), DiagonalStrategy()]
+
+    def make_move(self, row, col):
+        player = self.players[self.turn]
+
+        if not self.board.place_move(row, col, player.symbol):
+            print("Invalid move!")
+            return
+
+        move = Move(player, row, col)
+
+        # check winner
+        for strategy in self.strategies:
+            if strategy.check(self.board, move):
+                self.status = GameStatus.WIN
+                self.board.print_board()
+                print(f"{player.name} wins!")
+                return
+
+        # check draw
+        if self.board.is_full():
+            self.status = GameStatus.DRAW
+            self.board.print_board()
+            print("Game Draw!")
+            return
+
+        self.turn = 1 - self.turn
+
+
+# DRIVER CODE
+if __name__ == "__main__":
+    game = Game(3)
+
+    while game.status == GameStatus.IN_PROGRESS:
+        game.board.print_board()
+        try:
+            row = int(input("Enter row (1-3): ")) - 1
+            col = int(input("Enter col (1-3): ")) - 1
+        except ValueError:
+            print("Invalid input! Enter numbers only.")
+            continue
+        game.make_move(row, col)
+
+________________________________________________________________________________________________________________
+Q/A
+
+1. Functional Requirements
+Game rules:
+  2 players
+  Board size 3 × 3
+  Players take turns placing X or O
+  A player wins if they fill
+      a row
+      a column
+      a diagonal
+If board fills without winner → Draw
+APIs expected:
+  initializeGame()
+  makeMove(player, row, col)
+  checkWinner()
+  printBoard()
+
+2. Core Design Components
+Main objects:
+    Game
+    Board
+    Player
+    Move
+    GameStatus (enum)
+    Symbol (enum)
+3. Class Responsibilities
+Game
+Controls game flow.
+  startGame()
+  makeMove()
+  switchPlayer()
+  checkWinner()
+
+Board
+Maintains grid.
+  placeMove()
+  printBoard()
+  isCellEmpty()
+
+Player
+Attributes:
+  name
+  symbol (X / O)
+
+Move
+Represents a move.
+  row
+  col
+  player
+
+Enums
+Symbol = {X, O}
+GameStatus = {IN_PROGRESS, DRAW, WIN}
+
+4. Class Diagram (Simplified)
+Game
+ ├── Board
+ ├── Player[2]
+ └── GameStatus
+
+Board
+ └── grid[3][3]
+
+Player
+ ├── name
+ └── symbol
+
+Move
+ ├── row
+ ├── col
+ └── player
+
+7. Interview Follow-up Questions (VERY IMPORTANT)
+Interviewers almost always ask:
+
+1. How to optimize winner checking?
+Instead of scanning board every time:
+
+    Maintain:
+    rows[]
+    cols[]
+    diagonal
+    antiDiagonal
+Then winner check becomes
+
+O(1)
+2. Support NxN board
+Just change:
+  Board(size)
+3. Support multiple players
+Use
+  List<Player>
+  Queue<Player>
+4. Add Undo Move
+  Maintain
+  Stack<Move>
+5. Add AI Player
+  Use
+  Minimax Algorithm
+8. Interview-Level Answer (Short Version)
+
+In interviews say:
+I would design TicTacToe using core objects like Game, Board, Player and Move.
+The Board maintains the grid, Game controls turn management and win detection.
+To optimize win checking we can maintain row, column and diagonal counters to achieve O(1) winner detection.
