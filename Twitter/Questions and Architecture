@@ -1,1 +1,137 @@
 
+🔐 1. Security (Left Panel)
+Authentication & Authorization
+
+  What: Verifying who the user is (AuthN) and what they can do (AuthZ)
+  What we use: JWT tokens / OAuth 2.0 + Role-Based Access Control (RBAC)
+  Why: Every API call must be validated. Without this, anyone can post as anyone else
+  Interview point: "Auth & IAM" service at the bottom handles this centrally
+
+Encryption
+
+  What: Data protection in transit and at rest
+  What we use: TLS/HTTPS in transit, AES-256 at rest
+  Why: Protects passwords, DMs, personal data from interception
+
+🌐 2. CDN (Content Delivery Network)
+
+What: Geographically distributed servers that cache static content
+What we use: Cloudflare / AWS CloudFront
+Why:
+
+Serves images, videos, JS/CSS from nearest server to user
+Reduces latency dramatically (Delhi user gets content from Mumbai, not US)
+Reduces load on your origin servers
+
+
+Interview point: Media (profile pics, tweet images) is served via CDN, NOT your main server
+
+
+💻 3. Client Layer
+Two clients shown:
+ClientNotesWeb AppReact/Next.js, communicates over HTTPSMobile AppiOS/Android, same APIs
+
+Both communicate via HTTPS to the Load Balancer
+Why HTTPS? Encrypted channel — prevents man-in-the-middle attacks
+
+⚖️ 4. Load Balancer
+
+Algorithm: Round Robin
+Type: Layer 7 (Application Layer)
+What we use: AWS ALB / NGINX
+Why Round Robin? Distributes requests evenly across server instances
+Why Layer 7?
+
+Can inspect HTTP headers, URLs, cookies
+Can route /api/tweet to Tweet service, /api/search to Search service
+Supports sticky sessions, health checks, SSL termination
+
+
+Interview point: Layer 4 (TCP) is faster but dumb — Layer 7 is smarter and routes intelligently
+
+🚪 5. API Gateway
+
+What: Single entry point for all microservice calls
+What we use: AWS API Gateway / Kong
+Responsibilities:
+
+Rate limiting (prevent spam/DDoS)
+Authentication validation (checks JWT before forwarding)
+Request routing to correct microservice
+Logging & monitoring
+
+
+Why: Without it, clients would need to know every microservice address — tight coupling
+
+
+⚙️ 6. Microservices
+Tweet CRUD Service
+
+Create, Read, Update, Delete tweets
+Writes to Tweet Content DB
+On write → pushes to Message Queue for async fanout
+Why separate service? Most trafficked feature — can scale independently
+
+Reply CRUD Service
+
+Handles replies to tweets
+Has its own Replies DB
+Connected via CDC (Change Data Capture)
+Why CDC? Captures DB changes as events without polling — efficient real-time sync
+
+Search Service
+
+Full-text search on tweets
+Uses Elasticsearch as its database
+Why Elasticsearch? Built for full-text search, handles fuzzy matching, extremely fast at scale
+Fanout on read label means search results are assembled at query time
+
+Timeline Service
+
+Builds the home feed for users
+Reads from Timeline Cache (Redis)
+Why cache? Rebuilding feed for every request from DB would be too slow for millions of users
+
+Profile Service
+
+Manages user profiles
+Reads/writes User Data DB and Following Data DB
+Following data is likely a Graph DB (Neo4j) or adjacency list — naturally models relationships
+
+Auth & IAM Service
+
+Identity and Access Management
+Validates tokens for all other services
+What we use: Keycloak / AWS Cognito / custom JWT service
+
+
+📨 7. Message Queue
+
+What: Async messaging between services
+What we use: Apache Kafka / RabbitMQ
+Why:
+
+When you post a tweet, you have 10M followers — you can't update all timelines synchronously
+Queue decouples the Tweet service from Timeline Fanout
+If fanout is slow/down, tweets still get saved
+
+
+📤 8. Timeline Fanout Service
+
+What: Pushes new tweets to followers' timelines
+Strategy shown: Fanout on Write (Push model)
+How it works:
+
+Tweet posted → goes to Message Queue
+Fanout service reads queue
+Writes tweet ID to each follower's Timeline Cache (Redis)
+
+
+Interview tradeoff:
+
+Fanout on Write = fast reads, expensive writes (bad for celebrities with 50M followers)
+Fanout on Read = slow reads, cheap writes
+Hybrid: Use fanout-on-write for normal users, fanout-on-read for celebrities
+
+
+
