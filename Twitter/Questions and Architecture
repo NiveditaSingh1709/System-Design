@@ -143,5 +143,31 @@ What we use: Debezium + Kafka
 Why: Syncs Replies DB changes to other services without polling — event-driven, low latency
 
 
+-------------------------------------------------Q/A-------------------------------------------------------
+1-How does Fan Out service Work when a celebrity has 50 M followers?
+
+Problem: Fanout-on-write means writing to 50M timeline caches on every tweet — this is called the 'hotkey' or 'celebrity problem'.
+
+Solution — Hybrid Fanout:
+• Normal users (<10K followers) → Fanout on Write (pre-compute timelines in Redis)
+• Celebrities (>1M followers) → Fanout on Read (compute at query time)
+• On timeline request, merge: pre-built feed + lazy-loaded celebrity tweets
+
+Implementation: Tag celebrity accounts in User DB. Fanout service checks follower count before deciding strategy.
+Where to improve
+Add a follower-count threshold config (not hardcoded). Use a separate Celeb Tweet Cache with TTL so reads don't always hit DB. Consider ML-based thresholding based on engagement rate, not just follower count.
+
+2- How would you handle 100000 tweets per second at peak?
+
+Write path optimizations:
+• Kafka partitioning by user_id — parallel consumption across consumers
+• Cassandra for Tweet DB — designed for high write throughput, LSM tree storage
+• Write-behind caching: write to Redis first, async flush to DB
+• Shard API Gateway and Load Balancer horizontally
+
+Numbers: Twitter's actual peak is ~6,000 TPS. 100K TPS needs ~17x more capacity — achievable with horizontal pod autoscaling (HPA) in Kubernetes.
+Where to improve
+Implement backpressure mechanisms in Kafka consumers. Use CQRS (Command Query Responsibility Segregation) — separate write model from read model. Add circuit breakers between services.
+
 
 
