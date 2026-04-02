@@ -134,4 +134,14 @@ Fanout on Read = slow reads, cheap writes
 Hybrid: Use fanout-on-write for normal users, fanout-on-read for celebrities
 
 
+8 is on MD file
+
+🔄 9. CDC (Change Data Capture)
+
+What: Tracks changes in DB (inserts/updates/deletes) as a stream
+What we use: Debezium + Kafka
+Why: Syncs Replies DB changes to other services without polling — event-driven, low latency
+
+
+
 
