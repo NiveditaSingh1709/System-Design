@@ -169,5 +169,56 @@ Numbers: Twitter's actual peak is ~6,000 TPS. 100K TPS needs ~17x more capacity 
 Where to improve
 Implement backpressure mechanisms in Kafka consumers. Use CQRS (Command Query Responsibility Segregation) — separate write model from read model. Add circuit breakers between services.
 
+3-Why Cassandra for tweets instead of PostgreSQL?
 
+Cassandra wins on:
+• Write throughput: LSM-tree structure — appends only, no random I/O
+• Horizontal scaling: consistent hashing, no master node
+• High availability: tunable consistency (AP in CAP theorem)
+• Time-series data fits naturally (tweet_id as partition key)
 
+PostgreSQL wins on:
+• Complex joins (not needed for tweets)
+• Strong ACID transactions
+• Relational integrity
+
+Verdict: Tweets are write-heavy, append-only, never updated — perfect Cassandra use case.
+Where to improve
+Use Snowflake IDs (Twitter's actual approach) for tweet_id — encodes timestamp + machine_id + sequence. Enables time-range queries without secondary indexes.
+
+4-Expalin Message Queue in Detail--Why Kafka specifically?
+
+Kafka advantages over RabbitMQ:
+• Log-based: messages retained on disk, consumers can replay
+• Partitioning: parallel processing across consumer groups
+• Throughput: millions of messages/sec per broker
+• Ordering: guaranteed within a partition
+
+Tweet flow through Kafka:
+1. Tweet CRUD Service → produces to 'tweets' topic
+2. Fanout consumers read from partition assigned to their user shard
+3. Search indexer consumes same topic (separate consumer group)
+4. Analytics service also consumes — zero coupling
+
+Key config: replication factor = 3, min.insync.replicas = 2
+Where to improve
+Use Kafka Streams for real-time tweet analytics (trending topics). Implement dead-letter queues for failed fanout events. Add schema registry (Confluent) to enforce Avro schemas.
+
+5-How does timeLine Cache work? what's stored in Redis?
+Structure: Sorted Set per user
+• Key: timeline:{user_id}
+• Value: tweet_id (as member)
+• Score: timestamp (enables time-range pagination)
+
+Read flow:
+1. Timeline Service: ZREVRANGE timeline:user123 0 19 (latest 20 tweets)
+2. Fetch tweet content from Tweet Content DB by IDs
+3. Merge with real-time celebrity tweets (hybrid fanout)
+
+Write flow (Fanout Service):
+ZADD timeline:{follower_id} {timestamp} {tweet_id}
+ZREMRANGEBYRANK timeline:{follower_id} 0 -801 (keep last 800)
+Where to improve
+Add TTL per timeline key (7 days of inactivity → evict). Use Redis Cluster with consistent hashing. Add a Lua script for atomic ZADD + TRIM to avoid race conditions.
+
+6-
