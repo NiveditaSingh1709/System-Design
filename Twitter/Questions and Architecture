@@ -290,10 +290,58 @@ Bot detection:
 Where to improve
 Add API Gateway response caching to reduce backend load. Implement adaptive rate limiting (tighten limits when system is stressed). Add canary analysis to detect abnormal traffic patterns early.
 
+10-How does Elasticsearch get
+Two approaches:
 
+1. Dual Write (simpler, less reliable):
+Tweet CRUD Service → writes to DB + calls ES indexing API simultaneously
+Problem: partial failure = inconsistency
 
+2. Kafka + Consumer (production approach):
+Tweet CRUD → Kafka 'tweets' topic → ES Consumer → indexes document
+Benefits: decoupled, retryable, ordered
 
+ES Document structure:
+{ tweet_id, content, user_id, hashtags[], created_at, like_count }
 
+Search query: Multi-match on content + hashtags, filtered by date, sorted by relevance score + recency
+Where to improve
+Use ES ingest pipelines for tweet enrichment (language detection, entity extraction). Add search result personalization using user's interest graph. Implement query caching for trending search terms.
+
+11-How would you implement trending topics like twitter's #trending?
+Approach: Sliding Window Counter in Redis
+
+1. Every tweet processed by Fanout → extract hashtags
+2. Redis ZINCRBY trending:{window} 1 {hashtag} for each tag
+3. Use time-bucketed keys: trending:2024010112 (hour-level)
+4. Trending API: ZREVRANGE across last 24 buckets, aggregate scores
+
+Storm detection (prevent manipulation):
+• Cap contribution per user per hashtag per hour
+• Weight by unique user count, not raw count
+• Geo-segment trending (India trends ≠ US trends)
+
+Update frequency: Recompute every 30 seconds
+Where to improve
+Use Apache Flink for real-time stream processing of hashtags. Add novelty scoring — boost hashtags that are trending UP, not just high-volume. Use HyperLogLog in Redis for unique user count estimation.
+
+12-How load Balancer handles session persistence (sticky sessions)?
+Current setup: Round Robin (stateless)
+Works because: microservices are stateless, session state is in JWT tokens
+
+When sticky sessions are needed:
+• WebSocket connections (real-time notifications)
+• Long-running upload sessions
+
+Layer 7 sticky session options:
+• Cookie-based: ALB injects a cookie, routes same user to same instance
+• IP hash: consistent hashing on client IP (breaks with proxies/NAT)
+
+Better approach: Externalize state
+• Store session in Redis instead of server memory
+• Any server can handle any request → true horizontal scalability
+Where to improve
+Add health check endpoints (/health/live + /health/ready). Implement connection draining on instance shutdown. Use weighted routing to gradually shift traffic during deployments.
 
 
 
