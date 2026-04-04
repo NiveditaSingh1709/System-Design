@@ -221,4 +221,93 @@ ZREMRANGEBYRANK timeline:{follower_id} 0 -801 (keep last 800)
 Where to improve
 Add TTL per timeline key (7 days of inactivity → evict). Use Redis Cluster with consistent hashing. Add a Lua script for atomic ZADD + TRIM to avoid race conditions.
 
-6-
+6-how does CDC( Change Data Capture) work b/w reply service and other service?
+Tool: Debezium + Kafka
+
+How it works:
+1. Debezium connects to Replies DB as a replica
+2. Reads PostgreSQL WAL (Write-Ahead Log) — the change stream
+3. Converts each INSERT/UPDATE/DELETE into a Kafka event
+4. Downstream services consume these events
+
+Why not direct DB polling?
+• Polling creates DB load and has latency
+• CDC is event-driven — zero polling overhead
+• Guaranteed ordering within a table partition
+
+Use cases: Update reply counts on tweets, invalidate caches, sync to Elasticsearch
+Where to improve
+Use Outbox Pattern instead of direct CDC for transactional safety. Combine CDC with event sourcing for full audit trail. Add exactly-once semantics via Kafka transactions.
+
+7-How Would you shard the tweet Content Database?
+
+Strategy: Consistent Hashing on user_id
+• All tweets by a user on same shard → efficient user timeline queries
+• Shard key: user_id % num_shards
+
+Problem with hot users: Celebrity on one shard = hotspot
+Fix: Virtual nodes — celebrities get multiple virtual shards
+
+Alternative: tweet_id sharding
+• Distributes writes evenly
+• But 'get all tweets by user' needs scatter-gather across all shards
+
+Twitter's actual approach: Sharded MySQL (FlockDB for social graph) + Snowflake for IDs
+Where to improve
+Add shard rebalancing strategy using consistent hashing ring. Implement cross-shard query federation layer. Consider NewSQL databases (CockroachDB) that handle sharding automatically.
+
+8- what is CAP theorem tradeOff in the system?
+CAP Theorem: A distributed system can only guarantee 2 of: Consistency, Availability, Partition Tolerance
+
+Different services, different choices:
+• Tweet CRUD (Cassandra): AP — Available + Partition Tolerant. Eventual consistency is fine (slightly stale feed is OK)
+• Auth & IAM: CP — Consistent + Partition Tolerant. Must never allow stale auth tokens
+• Payment (if any): CP — Strong consistency required
+• Search (Elasticsearch): AP — Eventual index updates are acceptable
+
+Key interview phrase: 'We choose availability over consistency for read-heavy social features, but consistency for security-critical paths'
+Where to improve
+Document consistency guarantees per service in a 'consistency contract'. Use vector clocks or CRDTs for conflict resolution in distributed tweet storage.
+
+9- How would you prevent DDos Attack on API gateway?
+Layer 3/4 (Network level):
+• AWS Shield / Cloudflare to absorb volumetric attacks
+• IP allowlisting for admin endpoints
+
+Layer 7 (Application level) — API Gateway:
+• Rate limiting: 100 req/min per user_id, 1000 req/min per IP
+• Token bucket or sliding window algorithm
+• Geo-blocking for suspicious traffic patterns
+
+CDN as first line of defense:
+• Cache static content at edge — origin never sees the request
+• Cloudflare WAF (Web Application Firewall)
+
+Bot detection:
+• CAPTCHA on auth endpoints
+• Device fingerprinting
+• Anomaly detection (ML-based)
+Where to improve
+Add API Gateway response caching to reduce backend load. Implement adaptive rate limiting (tighten limits when system is stressed). Add canary analysis to detect abnormal traffic patterns early.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
